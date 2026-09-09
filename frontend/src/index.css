@@ -1,0 +1,143 @@
+@import url('https://api.fontshare.com/v2/css?f[]=clash-display@700,600,500&f[]=satoshi@400,500,700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Satoshi', 'Inter', system-ui, sans-serif;
+  --brutal-base: #E4E2DD;
+  --brutal-dark: #1E1E1E;
+  --brutal-red: #DB4A2B;
+  --brutal-orange: #F8A348;
+  --brutal-pink: #FF89A9;
+}
+
+/* Custom Text Selection */
+::selection {
+  background-color: #DB4A2B !important;
+  color: #FFFFFF !important;
+}
+
+/* 8px Swiss Brutalist Scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #DB4A2B #E4E2DD;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: #E4E2DD;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: #DB4A2B;
+  border-radius: 0px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #b5381d;
+}
+
+/* Entrance Animation */
+@keyframes slideUpEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.slide-up {
+  animation: slideUpEntrance 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Radial Multiply Blob */
+.multiply-blob {
+  mix-blend-mode: multiply;
+  filter: blur(100px);
+}
+
+@layer components {
+  .glass {
+    @apply bg-[#E4E2DD]/80 backdrop-blur-md border-2 border-[#1E1E1E] shadow-[4px_4px_0px_#1E1E1E];
+  }
+  .glass-hover {
+    @apply hover:bg-white hover:border-[#1E1E1E] hover:shadow-[6px_6px_0px_#1E1E1E] transition-all duration-200;
+  }
+  .brutal-card {
+    @apply bg-[#E4E2DD] border-2 border-[#1E1E1E] shadow-[4px_4px_0px_#1E1E1E] transition-all duration-200;
+  }
+  .badge-dataset {
+    @apply bg-[#DB4A2B] text-white border border-[#1E1E1E] font-mono text-[10px] tracking-wider uppercase px-2 py-0.5;
+  }
+  .badge-general {
+    @apply bg-[#F8A348] text-[#1E1E1E] border border-[#1E1E1E] font-mono text-[10px] tracking-wider uppercase px-2 py-0.5;
+  }
+  .badge-insufficient {
+    @apply bg-[#FF89A9] text-[#1E1E1E] border border-[#1E1E1E] font-mono text-[10px] tracking-wider uppercase px-2 py-0.5;
+  }
+  .btn-primary {
+    @apply bg-[#DB4A2B] hover:bg-[#c43e21] text-white font-bold
+           px-4 py-2 border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E]
+           hover:shadow-[5px_5px_0px_#1E1E1E] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none
+           transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-secondary {
+    @apply bg-white hover:bg-[#E4E2DD] text-[#1E1E1E] font-bold
+           px-4 py-2 border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E]
+           hover:shadow-[5px_5px_0px_#1E1E1E] active:translate-x-[2px] active:translate-y-[2px] active:shadow-none
+           transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply text-[#1E1E1E] hover:bg-[#1E1E1E]/10
+           px-3 py-2 border border-transparent hover:border-[#1E1E1E]/20
+           transition-all duration-150;
+  }
+  .input-field {
+    @apply bg-white border-2 border-[#1E1E1E] px-4 py-3
+           text-[#1E1E1E] placeholder-gray-500 focus:outline-none
+           focus:shadow-[4px_4px_0px_#DB4A2B]
+           transition-all duration-150;
+  }
+}
+
+/* Typing animation */
+@keyframes pulse-dot {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+.typing-dot { animation: pulse-dot 1.4s infinite ease-in-out; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* Markdown styling in chat */
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3 {
+  font-family: 'Clash Display', sans-serif;
+  @apply font-bold mt-3 mb-1 text-[#1E1E1E] tracking-tight;
+}
+.chat-markdown h1 { @apply text-lg; }
+.chat-markdown h2 { @apply text-base; }
+.chat-markdown p { @apply mb-2 leading-relaxed; }
+.chat-markdown ul, .chat-markdown ol { @apply pl-5 mb-2 space-y-1; }
+.chat-markdown ul { @apply list-disc; }
+.chat-markdown ol { @apply list-decimal; }
+.chat-markdown code {
+  @apply bg-[#1E1E1E]/10 text-[#DB4A2B] px-1.5 py-0.5 border border-[#1E1E1E]/20 text-sm font-mono;
+}
+.chat-markdown pre {
+  @apply bg-[#1E1E1E] text-[#E4E2DD] p-3 my-2 border-2 border-[#1E1E1E] overflow-x-auto;
+}
+.chat-markdown pre code {
+  @apply bg-transparent text-[#E4E2DD] border-none p-0;
+}
+.chat-markdown strong { @apply font-bold text-[#1E1E1E]; }
+.chat-markdown table { @apply border-collapse w-full my-2 border-2 border-[#1E1E1E]; }
+.chat-markdown th, .chat-markdown td {
+  @apply border border-[#1E1E1E] px-3 py-1.5 text-sm;
+}
+.chat-markdown th { @apply bg-[#1E1E1E]/10 font-bold; }

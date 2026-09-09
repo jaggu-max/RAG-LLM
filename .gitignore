@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build
+frontend/dist/
+frontend/build/
+
+# Data
+backend/chroma_db/
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/dataset/*
+!backend/dataset/.gitkeep
+backend/data/*.db
+backend/data/*.sqlite
+backend/data/*.sqlite3
+.env.*
+
+# Docker
+.docker/
+
+# Logs
+*.log
+logs/
