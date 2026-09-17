@@ -448,27 +448,32 @@ function CompactSourceCard({ source, onOpen }: { source: Source; onOpen: () => v
   const locationInfo = slidesStr || pagesStr || (source.section ? `Section: ${source.section}` : '');
 
   return (
-    <div className="bg-[#F9F8F5] border border-[#1E1E1E] p-2.5 space-y-1.5 shadow-[2px_2px_0px_#1E1E1E]">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 overflow-hidden pr-2">
-          <FileText className="w-3.5 h-3.5 text-[#DB4A2B] flex-shrink-0" />
-          <p className="font-mono text-xs font-bold text-[#1E1E1E] truncate">{source.file_name}</p>
+    <div className="px-3 py-2.5 space-y-1.5 bg-[#F9F8F5] hover:bg-white transition-colors">
+      {/* Filename row + Open Source button */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <FileText className="w-3.5 h-3.5 text-[#DB4A2B] shrink-0" />
+          <p className="font-mono text-xs font-bold text-[#1E1E1E] truncate max-w-[180px] sm:max-w-[260px]" title={source.file_name}>
+            {source.file_name}
+          </p>
         </div>
         <button
           onClick={onOpen}
-          className="flex items-center gap-1 bg-[#1E1E1E] text-white hover:bg-[#DB4A2B] text-[10px] font-mono font-bold px-2 py-0.5 transition-colors flex-shrink-0"
+          className="flex items-center gap-1 bg-[#1E1E1E] text-white hover:bg-[#DB4A2B] text-[10px] font-mono font-bold px-2 py-0.5 transition-colors shrink-0 whitespace-nowrap"
         >
           <span>Open Source</span>
           <ExternalLink className="w-2.5 h-2.5" />
         </button>
       </div>
 
+      {/* Location info */}
       {locationInfo && (
         <p className="font-mono text-[10px] text-[#DB4A2B] font-bold">{locationInfo}</p>
       )}
 
+      {/* Snippet — max 3 lines, scrollable */}
       {source.snippet && (
-        <p className="font-mono text-[10px] text-gray-700 bg-white p-1.5 border border-[#1E1E1E]/20 line-clamp-2 leading-tight">
+        <p className="font-mono text-[10px] text-gray-700 bg-white px-2 py-1.5 border border-[#1E1E1E]/20 line-clamp-3 leading-relaxed">
           "{source.snippet}"
         </p>
       )}
