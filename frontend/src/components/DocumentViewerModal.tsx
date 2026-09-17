@@ -82,6 +82,13 @@ export default function DocumentViewerModal({
     };
   }, [doc.id]);
 
+  // ESC key to close
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
   const handleImageLoad = () => {
     if (imgRef.current) {
       setImgDims({
@@ -117,8 +124,14 @@ export default function DocumentViewerModal({
   const structuredOcrText = docContent?.structured_ocr || docContent?.full_text || doc.full_text || '';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 slide-up overflow-y-auto">
-      <div className="bg-white border-2 border-[#1E1E1E] shadow-[8px_8px_0px_#1E1E1E] w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden my-auto">
+    <div
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start justify-center slide-up overflow-auto"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ padding: '2vh 2vw' }}>
+      <div
+        className="bg-white border-2 border-[#1E1E1E] shadow-[8px_8px_0px_#1E1E1E] w-full flex flex-col my-auto"
+        style={{ maxWidth: 'min(1100px, 96vw)', maxHeight: '96vh', overflow: 'hidden' }}
+        onClick={(e) => e.stopPropagation()}>
         
         {/* Header — Sticky & Always Visible */}
         <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 bg-[#1E1E1E] text-white border-b-2 border-[#1E1E1E] shrink-0 sticky top-0 z-50">
