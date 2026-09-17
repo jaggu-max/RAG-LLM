@@ -11,7 +11,7 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 
-def chunk_text(
+def chunk_text(    
     text: str,
     metadata: Dict[str, Any],
     document_id: str,
