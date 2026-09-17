@@ -14,7 +14,7 @@ from app.models.database import (
     add_to_chroma, delete_fts_by_document, delete_from_chroma,
     get_document, get_document_by_path, insert_document, insert_fts_chunks,
     update_document,  
-)
+)       
 from app.utils.hashing import hash_file
 
 log = get_logger(__name__)
@@ -300,3 +300,6 @@ def index_all_files() -> int:
                 if result:
                     count += 1
     return count
+
+
+
