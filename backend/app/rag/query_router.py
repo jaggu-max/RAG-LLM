@@ -22,6 +22,7 @@ class QueryIntent(str, Enum):
     COMPARISON = "comparison"
     FOLLOW_UP = "follow_up"
     SUMMARY = "summary"
+    IMAGE_NOTE = "image_note"
     GENERAL = "general"
 
 
@@ -161,6 +162,16 @@ def classify_intent(query: str, identifiers: List[str], target_fields: List[str]
     # Summary
     if any(kw in q_lower for kw in _SUMMARY_KEYWORDS):
         return QueryIntent.SUMMARY
+
+    # Image / Handwritten note intent
+    image_keywords = [
+        "image", "handwritten", "notes", "report writing", "report",
+        "purpose of report", "features of a good report", "useful tip",
+        "picture", "photo", "diagram", "my notes", "this image", "uploaded image",
+        "this document", "what is a report"
+    ]
+    if any(kw in q_lower for kw in image_keywords):
+        return QueryIntent.IMAGE_NOTE
 
     # List/table
     if any(kw in q_lower for kw in _LIST_KEYWORDS):

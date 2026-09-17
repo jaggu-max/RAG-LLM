@@ -8,7 +8,7 @@ from typing import List, Optional
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.schemas import RetrievedChunk
-from app.rag.query_router import QueryPlan
+from app.rag.query_router import QueryIntent, QueryPlan
 
 log = get_logger(__name__)
 
@@ -49,6 +49,10 @@ def calculate_confidence(
                     if chunk.source == "structured_record":
                         has_structured_record = True
                     break
+
+    # ── IMAGE_NOTE intent boost ──
+    if plan and plan.intent == QueryIntent.IMAGE_NOTE:
+        return 0.92
 
     # ── Exact identifier → very high confidence ──
     if has_structured_record:

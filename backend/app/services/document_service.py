@@ -109,3 +109,54 @@ def delete_document_by_id(doc_id: str) -> bool:
 def trigger_reindex(doc_id: str) -> Optional[str]:
     """Force re-index of a specific document."""
     return reindex_document(doc_id)
+
+
+def reprocess_ocr_document(doc_id: str) -> Optional[str]:
+    """Reprocess OCR for an image document by purging old chunks and running fresh OCR."""
+    doc = get_document(doc_id)
+    if not doc:
+        return None
+
+    file_path = doc.get("file_path", "")
+    if not file_path or not Path(file_path).exists():
+        ds_path = Path(settings.DATASET_PATH) / doc.get("filename", "")
+        if ds_path.exists():
+            file_path = str(ds_path)
+        else:
+            return None
+
+    log.info("Reprocessing OCR for document %s (%s)...", doc_id, doc.get("filename"))
+    return process_file(file_path, force=True)
+
+
+def purge_and_reprocess_placeholder_images() -> int:
+    """Scan database for image documents containing placeholder chunks and force re-index."""
+    reprocessed_count = 0
+    try:
+        docs = db_list()
+        for doc in docs:
+            file_type = str(doc.get("file_type", "")).lower()
+            if file_type in ("image", "png", "jpg", "jpeg", "webp"):
+                doc_id = doc["id"]
+                # Check if FTS chunks contain forbidden placeholders
+                from app.models.database import get_document_chunks
+                chunks = get_document_chunks(doc_id)
+                has_placeholder = False
+                if not chunks:
+                    has_placeholder = True
+                else:
+                    for c in chunks:
+                        txt_lower = str(c.get("text", "")).lower()
+                        if "ocr processing complete" in txt_lower or "[image:" in txt_lower or "visual content" in txt_lower:
+                            has_placeholder = True
+                            break
+
+                if has_placeholder:
+                    log.info("Found broken placeholder chunks for image %s (%s). Reprocessing...", doc_id, doc.get("filename"))
+                    res = reprocess_ocr_document(doc_id)
+                    if res:
+                        reprocessed_count += 1
+    except Exception as e:
+        log.error("Failed purging placeholder images: %s", e)
+    return reprocessed_count
+

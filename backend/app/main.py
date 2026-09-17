@@ -46,14 +46,16 @@ async def lifespan(app: FastAPI):
 
     threading.Thread(target=_preload_embeddings, daemon=True).start()
 
-    # 4. Index existing dataset files
+    # 4. Index existing dataset files & purge old placeholder image chunks
     if settings.AUTO_INDEX:
         def _initial_index():
             try:
                 from app.ingestion.processor import index_all_files
+                from app.services.document_service import purge_and_reprocess_placeholder_images
                 count = index_all_files()
-                if count:
-                    log.info("✓ Initial indexing: %d documents", count)
+                purged = purge_and_reprocess_placeholder_images()
+                if count or purged:
+                    log.info("✓ Initial indexing: %d documents, %d images reprocessed", count, purged)
             except Exception as e:
                 log.warning("Initial indexing deferred: %s", e)
 

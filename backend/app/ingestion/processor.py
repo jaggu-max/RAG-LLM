@@ -64,8 +64,13 @@ def process_file(filepath: str | Path, force: bool = False) -> Optional[str]:
     """
     filepath = Path(filepath)
     if not filepath.exists():
-        log.warning("File not found: %s", filepath)
-        return None
+        # Fallback: check inside dataset directory
+        ds_path = Path(settings.DATASET_PATH) / filepath.name
+        if ds_path.exists():
+            filepath = ds_path
+        else:
+            log.warning("File not found: %s", filepath)
+            return None
 
     ext = filepath.suffix.lower()
     file_type = EXTENSION_TO_TYPE.get(ext)
@@ -238,9 +243,14 @@ def reindex_document(doc_id: str) -> Optional[str]:
     if not doc:
         return None
     filepath = doc["file_path"]
-    if not Path(filepath).exists():
-        return None
-    return process_file(filepath, force=True)
+    fp = Path(filepath)
+    if not fp.exists():
+        ds_path = Path(settings.DATASET_PATH) / fp.name
+        if ds_path.exists():
+            fp = ds_path
+        else:
+            return None
+    return process_file(fp, force=True)
 
 
 def index_all_files() -> int:

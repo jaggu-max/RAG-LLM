@@ -95,7 +95,14 @@ async def serve_document_file(doc_id: str):
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Physical file missing on server")
 
-    media_type = "application/pdf" if doc["file_type"] == "pdf" else None
+    ext = file_path.suffix.lower()
+    if ext == ".pdf":
+        media_type = "application/pdf"
+    elif ext in (".png", ".jpg", ".jpeg", ".webp"):
+        media_type = f"image/{ext.lstrip('.') if ext != '.jpg' else 'jpeg'}"
+    else:
+        media_type = None
+
     headers = {"Content-Disposition": f"inline; filename=\"{doc['filename']}\""}
     return FileResponse(path=str(file_path), media_type=media_type, headers=headers)
 
@@ -206,3 +213,14 @@ async def reindex_document(doc_id: str):
     if not result:
         raise HTTPException(status_code=404, detail="Document not found or file missing")
     return {"message": "Document re-indexed successfully", "document_id": result}
+
+
+@router.post("/documents/{doc_id}/reprocess_ocr")
+async def reprocess_ocr(doc_id: str):
+    """Force purge of old placeholder chunks and re-run OCR & vision fallback."""
+    from app.services.document_service import reprocess_ocr_document
+    result = reprocess_ocr_document(doc_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Document not found or physical file missing")
+    return {"message": "OCR reprocessed successfully", "document_id": result}
+

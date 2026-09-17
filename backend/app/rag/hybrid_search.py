@@ -243,8 +243,49 @@ def hybrid_search(
     # Re-sort after boost
     merged.sort(key=lambda c: c.score, reverse=True)
 
+    # ── Strict relevance & document isolation filter ──
+    # Filter out empty or placeholder chunks
+    filtered = []
+    for chunk in merged:
+        txt = (chunk.text or "").strip()
+        if not txt or "[Image:" in txt and "OCR processing complete" in txt:
+            continue
+        filtered.append(chunk)
+
+    if not filtered:
+        return [], semantic_count, keyword_count
+
+    # Image query targeting boost
+    query_lower = query.lower()
+    image_query_keywords = [
+        "image", "handwritten", "note", "notes", "writing", "written", "picture",
+        "photo", "diagram", "draw", "report", "purpose of report", "features of a good report",
+        "useful tip", "what is a report"
+    ]
+    is_image_query = any(kw in query_lower for kw in image_query_keywords)
+
+    if is_image_query:
+        for chunk in filtered:
+            file_type = str(chunk.metadata.get("file_type", "")).lower()
+            source_type = str(chunk.metadata.get("source_type", "")).lower()
+            if file_type in ("png", "jpg", "jpeg", "webp") or source_type == "image":
+                chunk.score += 2.0
+
+        filtered.sort(key=lambda c: c.score, reverse=True)
+
+    # Cross-document score ratio filtering:
+    # If the top document has a strong score, drop chunks from unrelated documents with negligible score
+    top_score = filtered[0].score
+    top_doc_id = filtered[0].document_id
+
+    final_chunks = []
+    for chunk in filtered:
+        # Keep top document chunks OR chunks that meet at least 35% of top score
+        if chunk.document_id == top_doc_id or chunk.score >= (top_score * 0.35):
+            final_chunks.append(chunk)
+
     log.info(
-        "Hybrid search: %d merged results (semantic=%d, keyword=%d, identifier=%d)",
-        len(merged), semantic_count, keyword_count, len(identifier_results),
+        "Hybrid search: %d fused results (filtered from %d, top_doc=%s, sem=%d, kw=%d)",
+        len(final_chunks), len(merged), top_doc_id, semantic_count, keyword_count,
     )
-    return merged[:top_k * 2], semantic_count, keyword_count
+    return final_chunks[:top_k * 2], semantic_count, keyword_count

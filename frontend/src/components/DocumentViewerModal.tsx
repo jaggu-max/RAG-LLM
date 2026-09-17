@@ -14,6 +14,7 @@ interface DocumentViewerProps {
     chunks_count: number;
     chunks?: Array<{ chunk_id: string; text: string; page_number?: number }>;
     full_text?: string;
+    status?: string;
   };
   onClose: () => void;
   initialTab?: 'document' | 'chunks' | 'full';
@@ -95,8 +96,11 @@ export default function DocumentViewerModal({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  const isImageFile = ['png', 'jpg', 'jpeg', 'webp', 'image'].includes((doc.file_type || '').toLowerCase());
+  const rawImageUrl = `${API_BASE}/documents/${doc.id}/file`;
   const slideImageUrl = `${API_BASE}/documents/${doc.id}/preview/slide/${currentSlide}`;
   const pdfPreviewUrl = `${API_BASE}/documents/${doc.id}/preview/pdf`;
+  const displayImgSrc = isImageFile ? rawImageUrl : slideImageUrl;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 slide-up">
@@ -224,17 +228,18 @@ export default function DocumentViewerModal({
                   <Loader2 className="w-8 h-8 animate-spin text-[#DB4A2B]" />
                   <p className="font-bold">Preparing presentation slides preview...</p>
                 </div>
-              ) : previewMeta?.has_images ? (
+              ) : (previewMeta?.has_images || isImageFile) ? (
                 <div
                   className="transition-all duration-200 shadow-xl border-2 border-[#1E1E1E] bg-white max-h-full flex items-center justify-center overflow-hidden"
                   style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center center' }}>
                   <img
-                    src={slideImageUrl}
-                    alt={`Slide ${currentSlide}`}
+                    src={displayImgSrc}
+                    alt={isImageFile ? doc.filename : `Slide ${currentSlide}`}
                     className="max-h-[58vh] max-w-full object-contain"
                     onError={(e) => {
-                      // Fallback to PDF iframe if image fails
-                      (e.target as HTMLElement).style.display = 'none';
+                      if (isImageFile && (e.target as HTMLImageElement).src !== rawImageUrl) {
+                        (e.target as HTMLImageElement).src = rawImageUrl;
+                      }
                     }}
                   />
                 </div>
@@ -285,8 +290,36 @@ export default function DocumentViewerModal({
           )}
 
           {activeTab === 'full' && (
-            <div className="w-full h-[65vh] bg-white border-2 border-[#1E1E1E] p-6 overflow-auto shadow-[4px_4px_0px_#1E1E1E]">
-              <pre className="font-mono text-xs whitespace-pre-wrap leading-relaxed text-[#1E1E1E]">
+            <div className="w-full h-[65vh] bg-white border-2 border-[#1E1E1E] p-6 overflow-auto shadow-[4px_4px_0px_#1E1E1E] flex flex-col">
+              {(!doc.full_text || doc.full_text.includes("OCR processing complete") || doc.status === 'failed') && (
+                <div className="mb-4 p-4 bg-[#FFF5F2] border-2 border-[#DB4A2B] shadow-[3px_3px_0px_#DB4A2B] flex flex-col md:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-[#DB4A2B]">
+                    <AlertCircle className="w-5 h-5 shrink-0" />
+                    <div>
+                      <p className="font-bold text-xs uppercase">OCR Processing Status</p>
+                      <p className="text-[11px] font-sans">
+                        {doc.status === 'failed' ? 'OCR failed — Reprocess required' : 'Placeholder text detected. Trigger reprocessing to extract full text.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        setLoading(true);
+                        await fetch(`${API_BASE}/documents/${doc.id}/reprocess_ocr`, { method: 'POST' });
+                        window.location.reload();
+                      } catch (err) {
+                        alert('Reprocessing failed: ' + err);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-[#DB4A2B] text-white font-bold text-xs border border-[#1E1E1E] shadow-[2px_2px_0px_#1E1E1E] hover:translate-x-0.5 hover:translate-y-0.5 transition-all shrink-0">
+                    🔄 REPROCESS OCR
+                  </button>
+                </div>
+              )}
+              <pre className="font-mono text-xs whitespace-pre-wrap leading-relaxed text-[#1E1E1E] flex-1">
                 {doc.full_text || 'No text extracted.'}
               </pre>
             </div>

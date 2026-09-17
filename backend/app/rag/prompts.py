@@ -153,6 +153,7 @@ def get_prompt_for_intent(intent: str) -> str:
         QueryIntent.TABLE_LIST: LIST_PROMPT,
         QueryIntent.SUMMARY: SUMMARY_PROMPT,
         QueryIntent.PAGE_LOOKUP: PAGE_PROMPT,
+        QueryIntent.IMAGE_NOTE: SYSTEM_PROMPT,
         QueryIntent.KEYWORD: SYSTEM_PROMPT,
         QueryIntent.SEMANTIC: SYSTEM_PROMPT,
         QueryIntent.FOLLOW_UP: SYSTEM_PROMPT,

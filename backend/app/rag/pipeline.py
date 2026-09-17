@@ -58,6 +58,51 @@ def _preprocess_query(query: str, conversation_id: str) -> str:
     return expanded
 
 
+def _get_image_document() -> Optional[dict]:
+    """Find the most recent image document in the system."""
+    from app.models.database import list_documents
+    docs = list_documents()
+    for d in docs:
+        if d.get("file_type", "").lower() in ("image", "png", "jpg", "jpeg", "webp"):
+            return d
+    return None
+
+
+def _vision_answer_from_image(query: str, doc: dict) -> str:
+    """Analyze original image directly using Vision LLM when OCR retrieval is low confidence."""
+    import base64
+    from pathlib import Path
+    import requests
+
+    filepath = Path(doc["file_path"])
+    if not filepath.exists():
+        return ""
+    try:
+        url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+        with open(filepath, "rb") as f:
+            b64_img = base64.b64encode(f.read()).decode("utf-8")
+
+        prompt = (
+            f"You are NEXUS, an enterprise knowledge assistant analyzing an uploaded image/handwritten document ({doc['filename']}).\n"
+            f"Question: {query}\n\n"
+            f"Read and transcribe the image text accurately, then answer the question directly based ONLY on the contents of this image."
+        )
+
+        payload = {
+            "model": "gemma3:4b",
+            "prompt": prompt,
+            "images": [b64_img],
+            "stream": False,
+        }
+
+        resp = requests.post(url, json=payload, timeout=25)
+        if resp.status_code == 200:
+            return resp.json().get("response", "").strip()
+    except Exception as e:
+        log.warning("Direct vision LLM answer failed for %s: %s", doc["filename"], e)
+    return ""
+
+
 def process_query(request: ChatRequest) -> ChatResponse:
     """Main RAG pipeline — synchronous version."""
     start_time = time.time()
@@ -90,13 +135,26 @@ def process_query(request: ChatRequest) -> ChatResponse:
         if plan.resolved_query:
             search_query = plan.resolved_query
         elif plan.intent == QueryIntent.FOLLOW_UP:
-            # Use context-enriched query for follow-ups
             search_query = _preprocess_query(query, conversation_id)
 
         # Step 5: Multi-strategy hybrid retrieval
         candidates, semantic_count, keyword_count = hybrid_search(
             search_query, plan=plan
         )
+
+        # If query is about an image or handwritten note, isolate image candidates
+        is_image_intent = plan.intent == QueryIntent.IMAGE_NOTE
+        if is_image_intent and candidates:
+            img_candidates = []
+            for c in candidates:
+                meta = getattr(c, "metadata", {}) or {}
+                fn = str(meta.get("file_name", "") or meta.get("source_document", "")).lower()
+                ft = str(meta.get("file_type", "")).lower()
+                st = str(meta.get("source_type", "")).lower()
+                if ft in ("image", "png", "jpg", "jpeg", "webp") or st == "image" or any(fn.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")):
+                    img_candidates.append(c)
+            if img_candidates:
+                candidates = img_candidates
 
         # Step 6: Rerank with intent awareness
         reranked = rerank(search_query, candidates, plan=plan)
@@ -107,18 +165,49 @@ def process_query(request: ChatRequest) -> ChatResponse:
         # Step 7: Calculate confidence
         confidence = calculate_confidence(reranked, query, plan=plan) if reranked else 0.0
 
-        # Step 8: Build context with plan awareness
+        # Step 8: Image Vision Fallback if image query but OCR retrieval confidence is low (< 0.25)
+        if is_image_intent and (confidence < 0.25 or not reranked):
+            img_doc = _get_image_document()
+            if img_doc:
+                log.info("Low OCR confidence for image query. Using direct Vision LLM fallback for %s...", img_doc["filename"])
+                vision_answer = _vision_answer_from_image(query, img_doc)
+                if vision_answer:
+                    elapsed = int((time.time() - start_time) * 1000)
+                    sources = [Source(
+                        file_name=img_doc["filename"],
+                        document_id=img_doc["id"],
+                        file_type=img_doc["file_type"],
+                        page=1,
+                        pages=[1],
+                        chunk_count=1,
+                        score=0.95,
+                        snippet=vision_answer[:200],
+                    )]
+                    log_query(query, "dataset", 0.95, model_name, elapsed)
+                    _store_conversation(conversation_id, query, vision_answer, model=model_name, answer_type="dataset", confidence=0.95, sources=[s.model_dump() for s in sources])
+                    return ChatResponse(
+                        answer=vision_answer,
+                        answer_type=AnswerType.DATASET,
+                        confidence=0.95,
+                        model=model_name,
+                        sources=sources,
+                        retrieval=RetrievalInfo(semantic_results=1, keyword_results=0, reranked_results=1, unique_source_count=1),
+                        response_time_ms=elapsed,
+                        conversation_id=conversation_id,
+                    )
+
+        # Step 9: Build context with plan awareness
         context = build_context(reranked, plan=plan) if reranked else "No matching documents found."
 
-        # Step 9: Select prompt based on intent
+        # Step 10: Select prompt based on intent
         prompt_template = get_prompt_for_intent(plan.intent)
         system = prompt_template.format(context=context)
 
-        # Step 10: Generate answer & clean residual evidence markers
+        # Step 11: Generate answer & clean residual evidence markers
         raw_answer = generate_fn(query, system_prompt=system, model_name=model_name)
         answer = _clean_answer_text(raw_answer)
 
-        # Step 11: Build deduplicated sources
+        # Step 12: Build deduplicated sources
         sources, unique_source_count = _build_deduplicated_sources(reranked)
 
         elapsed = int((time.time() - start_time) * 1000)
@@ -295,9 +384,9 @@ def _build_deduplicated_sources(chunks) -> tuple[List[Source], int]:
 
     grouped: Dict[str, Dict[str, Any]] = {}
     for chunk in chunks:
-        meta = chunk.metadata or {}
-        doc_id = meta.get("document_id") or meta.get("doc_id") or meta.get("file_name", "Unknown")
-        file_name = meta.get("file_name", "") or meta.get("source_document", "Unknown")
+        meta = getattr(chunk, "metadata", {}) or {}
+        doc_id = getattr(chunk, "document_id", "") or meta.get("document_id") or meta.get("doc_id") or meta.get("file_name", "Unknown")
+        file_name = meta.get("file_name", "") or getattr(chunk, "file_name", "") or meta.get("source_document", "Unknown")
         file_type = meta.get("file_type") or (file_name.split(".")[-1].lower() if "." in file_name else "")
 
         page = meta.get("page_number")
