@@ -117,16 +117,16 @@ def reprocess_ocr_document(doc_id: str) -> Optional[str]:
     if not doc:
         return None
 
-    file_path = doc.get("file_path", "")
-    if not file_path or not Path(file_path).exists():
-        ds_path = Path(settings.DATASET_PATH) / doc.get("filename", "")
-        if ds_path.exists():
-            file_path = str(ds_path)
-        else:
+    from app.ingestion.processor import resolve_document_file_path, process_file
+    resolved_path = resolve_document_file_path(doc.get("file_path", ""))
+    if not resolved_path.exists():
+        resolved_path = resolve_document_file_path(doc.get("filename", ""))
+        if not resolved_path.exists():
+            log.error("Reprocess OCR failed: Physical file missing for %s (%s)", doc_id, doc.get("filename"))
             return None
 
-    log.info("Reprocessing OCR for document %s (%s)...", doc_id, doc.get("filename"))
-    return process_file(file_path, force=True)
+    log.info("Reprocessing OCR for document %s (%s) at %s...", doc_id, doc.get("filename"), resolved_path)
+    return process_file(resolved_path, force=True)
 
 
 def purge_and_reprocess_placeholder_images() -> int:

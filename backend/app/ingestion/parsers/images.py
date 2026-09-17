@@ -38,17 +38,34 @@ def _preprocess_image(filepath: Path) -> List[Any]:
     """Generate multiple preprocessed OpenCV image variants to maximize OCR accuracy."""
     import cv2
     import numpy as np
+    import traceback
     from PIL import Image, ImageOps
+    from app.ingestion.processor import resolve_document_file_path
+
+    resolved_path = resolve_document_file_path(filepath)
+    if not resolved_path.exists():
+        log.error("Image file not found at path: %s (original: %s)", resolved_path, filepath)
+        return []
 
     variants = []
     try:
         # Load image & correct EXIF orientation if needed
-        pil_img = Image.open(str(filepath))
+        pil_img = Image.open(str(resolved_path))
         try:
             pil_img = ImageOps.exif_transpose(pil_img)
         except Exception:
             pass
-        pil_img = pil_img.convert("RGB")
+
+        # Handle RGBA/CMYK/Palette transparency normalization
+        if pil_img.mode in ("RGBA", "LA") or (pil_img.mode == "P" and "transparency" in pil_img.info):
+            bg = Image.new("RGB", pil_img.size, (255, 255, 255))
+            if pil_img.mode != "RGBA":
+                pil_img = pil_img.convert("RGBA")
+            bg.paste(pil_img, mask=pil_img.split()[3])
+            pil_img = bg
+        else:
+            pil_img = pil_img.convert("RGB")
+
         img_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
         # Scale up small images for better OCR resolution
@@ -76,7 +93,7 @@ def _preprocess_image(filepath: Path) -> List[Any]:
         )
         variants.append(adaptive_thresh)
     except Exception as e:
-        log.warning("OpenCV image preprocessing error for %s: %s", filepath.name, e)
+        log.error("OpenCV image preprocessing error for %s: %s\nTraceback:\n%s", filepath.name, e, traceback.format_exc())
 
     return variants
 
@@ -160,20 +177,106 @@ def _call_ollama_vision_fallback(filepath: Path) -> str:
     return ""
 
 
+def _extract_layout_blocks_tesseract(img: Any) -> List[Dict[str, Any]]:
+    """Extract layout-aware text blocks with bounding boxes and line numbers using Tesseract image_to_data."""
+    blocks: List[Dict[str, Any]] = []
+    try:
+        import pytesseract
+
+        data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+        n_boxes = len(data["text"])
+
+        lines_map: Dict[Tuple[int, int], List[Dict[str, Any]]] = {}
+
+        for i in range(n_boxes):
+            txt = (data["text"][i] or "").strip()
+            conf_val = data["conf"][i]
+
+            # Filter out blank entries
+            if not txt or _is_forbidden_placeholder(txt):
+                continue
+
+            # Flag low confidence words
+            if isinstance(conf_val, (int, float)) and 0 < conf_val < 35:
+                txt = "[unclear]"
+
+            block_num = data["block_num"][i]
+            line_num = data["line_num"][i]
+            left = data["left"][i]
+            top = data["top"][i]
+            w = data["width"][i]
+            h = data["height"][i]
+
+            key = (block_num, line_num)
+            if key not in lines_map:
+                lines_map[key] = []
+            lines_map[key].append({
+                "word": txt,
+                "bbox": [left, top, w, h],
+                "conf": conf_val if isinstance(conf_val, (int, float)) else 50.0,
+            })
+
+        # Assemble lines into structured blocks
+        b_idx = 0
+        for (b_num, l_num), words in sorted(lines_map.items(), key=lambda k: (k[0][0], k[0][1])):
+            line_text = " ".join([w["word"] for w in words]).strip()
+            if not line_text or _is_forbidden_placeholder(line_text):
+                continue
+
+            min_x = min(w["bbox"][0] for w in words)
+            min_y = min(w["bbox"][1] for w in words)
+            max_x = max(w["bbox"][0] + w["bbox"][2] for w in words)
+            max_y = max(w["bbox"][1] + w["bbox"][3] for w in words)
+            bbox = [min_x, min_y, max_x - min_x, max_y - min_y]
+
+            # Determine line type (heading, bullet, paragraph)
+            line_type = "paragraph"
+            t_lower = line_text.lower()
+            if line_text.startswith(("•", "-", "*")) or re.match(r"^\d+[\.\)]", line_text):
+                line_type = "bullet"
+            elif any(h_word in t_lower for h_word in ["notes", "introduction", "purpose", "features", "tip", "summary", "heading"]) or line_text.isupper() or line_text.endswith(":"):
+                line_type = "heading"
+
+            avg_conf = sum(w["conf"] for w in words if isinstance(w["conf"], (int, float))) / max(1, len(words))
+
+            blocks.append({
+                "block_id": f"b{b_idx}",
+                "text": line_text,
+                "type": line_type,
+                "page": 1,
+                "bbox": bbox,
+                "line_number": l_num,
+                "confidence": round(avg_conf / 100.0, 2),
+            })
+            b_idx += 1
+
+    except Exception as e:
+        log.debug("Tesseract layout extraction fallback: %s", e)
+
+    return blocks
+
+
 def parse(filepath: str | Path) -> List[Tuple[str, Dict[str, Any]]]:
-    """Parse image using multi-stage OCR (Tesseract + EasyOCR + Vision LLM Fallback)."""
+    """Parse image using multi-stage layout-aware OCR (Tesseract + EasyOCR + Vision LLM Fallback)."""
     filepath = Path(filepath)
     log.info("Parsing image file: %s", filepath.name)
 
     variants = _preprocess_image(filepath)
 
-    # 1. Run Tesseract OCR
+    # 1. Extract layout-aware positional blocks
+    layout_blocks = []
+    if variants:
+        layout_blocks = _extract_layout_blocks_tesseract(variants[0])
+        if not layout_blocks and len(variants) > 1:
+            layout_blocks = _extract_layout_blocks_tesseract(variants[1])
+
+    # 2. Run Tesseract OCR
     tess_text = _run_tesseract(variants)
 
-    # 2. Run EasyOCR
+    # 3. Run EasyOCR
     easy_text = _run_easyocr(variants)
 
-    # Combine & deduplicate line by line
+    # Combine & deduplicate line by line for raw_ocr
     combined_lines = []
     seen = set()
     for source_text in [tess_text, easy_text]:
@@ -187,34 +290,54 @@ def parse(filepath: str | Path) -> List[Tuple[str, Dict[str, Any]]]:
                     seen.add(norm_key)
                     combined_lines.append(cleaned_line)
 
-    extracted_text = "\n".join(combined_lines).strip()
+    raw_ocr = "\n".join(combined_lines).strip()
 
-    # 3. Vision LLM Fallback if OCR produced minimal text (< 30 characters)
-    if len(extracted_text) < 30:
-        log.info("OCR output for %s is minimal (%d chars). Attempting vision fallback...", filepath.name, len(extracted_text))
+    # 4. Vision LLM Fallback if OCR produced minimal text (< 30 characters)
+    if len(raw_ocr) < 30:
+        log.info("OCR output for %s is minimal (%d chars). Attempting vision fallback...", filepath.name, len(raw_ocr))
         vision_text = _call_ollama_vision_fallback(filepath)
-        if vision_text and len(vision_text) > len(extracted_text):
-            extracted_text = vision_text
+        if vision_text and len(vision_text) > len(raw_ocr):
+            raw_ocr = vision_text
 
-    cleaned_final = clean_text(extracted_text)
+    cleaned_final = clean_text(raw_ocr)
 
     # Sanity filter against placeholders
     if _is_forbidden_placeholder(cleaned_final):
         cleaned_final = ""
 
-    # 4. Strict guard: If actual extraction failed, return empty list so document is marked as failed, NOT placeholder text
+    # 5. Strict guard: If actual extraction failed, return empty list
     if not cleaned_final or len(cleaned_final) < 5:
         log.warning("No readable text could be extracted from image %s", filepath.name)
         return []
 
+    # 6. Generate Structured Document OCR (headings, bullet points, paragraph breaks)
+    structured_parts = []
+    if layout_blocks:
+        for b in layout_blocks:
+            b_text = b["text"]
+            b_type = b.get("type", "paragraph")
+            if b_type == "heading":
+                structured_parts.append(f"\n### {b_text}\n")
+            elif b_type == "bullet":
+                structured_parts.append(f"  • {b_text.lstrip('•-* ')}")
+            else:
+                structured_parts.append(f"{b_text}")
+        structured_ocr = "\n".join(structured_parts).strip()
+    else:
+        structured_ocr = cleaned_final
+
     confidence = "high" if len(cleaned_final) > 100 else ("medium" if len(cleaned_final) > 30 else "low")
 
-    log.info("✓ Successfully extracted %d chars from image %s (OCR confidence: %s)", len(cleaned_final), filepath.name, confidence)
+    log.info("✓ Extracted %d chars & %d layout blocks from %s (OCR confidence: %s)",
+             len(cleaned_final), len(layout_blocks), filepath.name, confidence)
 
-    return [(cleaned_final, {
+    return [(structured_ocr, {
         "source_type": "image",
         "file_name": filepath.name,
         "ocr_confidence": confidence,
+        "raw_ocr": cleaned_final,
+        "structured_ocr": structured_ocr,
+        "layout_blocks": json.dumps(layout_blocks),
         "page_number": 1,
         "image_number": 1,
         "slide_number": 1,

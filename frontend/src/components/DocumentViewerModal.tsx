@@ -1,9 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
-  FileText, X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Download,
-  Loader2, Layers, AlignLeft, RefreshCw, AlertCircle
+  FileText, X, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Download,
+  Loader2, Layers, AlignLeft, AlertCircle, Eye, FileCode
 } from 'lucide-react';
-import { API_BASE, getDocPreviewMetadata, downloadOriginalDoc } from '../services/api';
+import { API_BASE, downloadOriginalDoc } from '../services/api';
+
+interface LayoutBlock {
+  block_id: string;
+  text: string;
+  type: string;
+  page?: number;
+  bbox?: [number, number, number, number]; // [x, y, w, h]
+  line_number?: number;
+  confidence?: number;
+}
 
 interface DocumentViewerProps {
   doc: {
@@ -30,39 +40,38 @@ export default function DocumentViewerModal({
   highlightText,
 }: DocumentViewerProps) {
   const [activeTab, setActiveTab] = useState<'document' | 'chunks' | 'full'>(initialTab);
+  const [ocrViewMode, setOcrViewMode] = useState<'structured' | 'raw'>('structured');
   const [currentSlide, setCurrentSlide] = useState<number>(initialSlide);
   const [zoom, setZoom] = useState<number>(100);
   const [loading, setLoading] = useState<boolean>(true);
-  const [previewMeta, setPreviewMeta] = useState<{
-    page_count: number;
-    preview_type: string;
-    has_pdf: boolean;
-    has_images: boolean;
-    status: string;
+  const [docContent, setDocContent] = useState<{
+    full_text: string;
+    raw_ocr: string;
+    structured_ocr: string;
+    layout_blocks: LayoutBlock[];
+    chunks: Array<{ chunk_id: string; text: string; page_number?: number }>;
   } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+
+  const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+
+  const imgRef = useRef<HTMLImageElement>(null);
+  const [imgDims, setImgDims] = useState<{ naturalWidth: number; naturalHeight: number; clientWidth: number; clientHeight: number } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
-    setError(null);
 
-    getDocPreviewMetadata(doc.id)
-      .then((meta) => {
+    fetch(`${API_BASE}/documents/${doc.id}/content`)
+      .then((res) => res.json())
+      .then((data) => {
         if (!isMounted) return;
-        setPreviewMeta(meta);
+        setDocContent(data);
         setLoading(false);
       })
       .catch((err) => {
         if (!isMounted) return;
-        console.warn('Preview metadata fetch failed, using fallback:', err);
-        setPreviewMeta({
-          page_count: doc.chunks_count || 1,
-          preview_type: 'fallback',
-          has_pdf: doc.file_type === 'pdf',
-          has_images: false,
-          status: 'ready',
-        });
+        console.warn('Document content fetch error:', err);
         setLoading(false);
       });
 
@@ -71,14 +80,15 @@ export default function DocumentViewerModal({
     };
   }, [doc.id]);
 
-  const totalPages = previewMeta?.page_count || 1;
-
-  const handlePrevSlide = () => {
-    setCurrentSlide((prev) => Math.max(1, prev - 1));
-  };
-
-  const handleNextSlide = () => {
-    setCurrentSlide((prev) => Math.min(totalPages, prev + 1));
+  const handleImageLoad = () => {
+    if (imgRef.current) {
+      setImgDims({
+        naturalWidth: imgRef.current.naturalWidth || 1,
+        naturalHeight: imgRef.current.naturalHeight || 1,
+        clientWidth: imgRef.current.clientWidth || 1,
+        clientHeight: imgRef.current.clientHeight || 1,
+      });
+    }
   };
 
   const handleChunkClick = (pageNo?: number) => {
@@ -98,22 +108,24 @@ export default function DocumentViewerModal({
 
   const isImageFile = ['png', 'jpg', 'jpeg', 'webp', 'image'].includes((doc.file_type || '').toLowerCase());
   const rawImageUrl = `${API_BASE}/documents/${doc.id}/file`;
-  const slideImageUrl = `${API_BASE}/documents/${doc.id}/preview/slide/${currentSlide}`;
   const pdfPreviewUrl = `${API_BASE}/documents/${doc.id}/preview/pdf`;
-  const displayImgSrc = isImageFile ? rawImageUrl : slideImageUrl;
+
+  const blocks = docContent?.layout_blocks || [];
+  const rawOcrText = docContent?.raw_ocr || docContent?.full_text || doc.full_text || '';
+  const structuredOcrText = docContent?.structured_ocr || docContent?.full_text || doc.full_text || '';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 slide-up">
-      <div className="bg-white border-2 border-[#1E1E1E] shadow-[8px_8px_0px_#1E1E1E] w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 slide-up">
+      <div className="bg-white border-2 border-[#1E1E1E] shadow-[8px_8px_0px_#1E1E1E] w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden">
         
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-3 bg-[#1E1E1E] text-white border-b-2 border-[#1E1E1E]">
           <div className="flex items-center gap-3">
             <FileText className="w-5 h-5 text-[#DB4A2B]" />
             <div>
-              <h2 className="font-display text-base font-bold truncate max-w-[450px]">{doc.filename}</h2>
+              <h2 className="font-display text-base font-bold truncate max-w-[500px]">{doc.filename}</h2>
               <p className="font-mono text-[10px] text-white/70 uppercase">
-                TYPE: {doc.file_type} • SIZE: {formatSize(doc.size_bytes)} • CHUNKS: {doc.chunks_count} • SLIDES: {totalPages}
+                TYPE: {doc.file_type} • SIZE: {formatSize(doc.size_bytes)} • CHUNKS: {doc.chunks_count} • DETECTED BLOCKS: {blocks.length}
               </p>
             </div>
           </div>
@@ -133,7 +145,7 @@ export default function DocumentViewerModal({
           </div>
         </div>
 
-        {/* Modal Tabs Bar */}
+        {/* Modal Navigation & Controls Bar */}
         <div className="flex items-center justify-between px-6 py-2 bg-[#E4E2DD] border-b-2 border-[#1E1E1E]">
           <div className="flex items-center gap-2">
             <button
@@ -149,7 +161,7 @@ export default function DocumentViewerModal({
               className={`font-mono text-xs font-bold px-3 py-1 border border-[#1E1E1E] transition-all flex items-center gap-1.5 ${
                 activeTab === 'chunks' ? 'bg-[#DB4A2B] text-white shadow-[2px_2px_0px_#1E1E1E]' : 'bg-white text-[#1E1E1E]'
               }`}>
-              <span>CHUNKS ({doc.chunks?.length || doc.chunks_count})</span>
+              <span>CHUNKS ({docContent?.chunks?.length || doc.chunks_count})</span>
             </button>
             <button
               onClick={() => setActiveTab('full')}
@@ -161,45 +173,33 @@ export default function DocumentViewerModal({
             </button>
           </div>
 
-          {/* Slide Navigation Controls */}
-          {activeTab === 'document' && totalPages > 1 && (
+          {/* View Mode & Zoom Controls */}
+          {activeTab === 'document' && (
             <div className="flex items-center gap-3 font-mono text-xs">
-              <div className="flex items-center gap-1 bg-white border border-[#1E1E1E] px-2 py-0.5 shadow-[2px_2px_0px_#1E1E1E]">
+              <div className="flex items-center bg-white border border-[#1E1E1E] shadow-[2px_2px_0px_#1E1E1E]">
                 <button
-                  onClick={handlePrevSlide}
-                  disabled={currentSlide <= 1}
-                  className="p-1 hover:bg-[#F0EEE6] disabled:opacity-30 disabled:hover:bg-transparent">
-                  <ChevronLeft className="w-4 h-4" />
+                  onClick={() => setOcrViewMode('structured')}
+                  className={`px-2.5 py-1 text-[11px] font-bold ${
+                    ocrViewMode === 'structured' ? 'bg-[#1E1E1E] text-white' : 'text-[#1E1E1E] hover:bg-gray-100'
+                  }`}>
+                  Structured Document
                 </button>
-                <span className="font-bold px-2">
-                  Slide {currentSlide} / {totalPages}
-                </span>
                 <button
-                  onClick={handleNextSlide}
-                  disabled={currentSlide >= totalPages}
-                  className="p-1 hover:bg-[#F0EEE6] disabled:opacity-30 disabled:hover:bg-transparent">
-                  <ChevronRight className="w-4 h-4" />
+                  onClick={() => setOcrViewMode('raw')}
+                  className={`px-2.5 py-1 text-[11px] font-bold border-l border-[#1E1E1E] ${
+                    ocrViewMode === 'raw' ? 'bg-[#1E1E1E] text-white' : 'text-[#1E1E1E] hover:bg-gray-100'
+                  }`}>
+                  Raw Faithful OCR
                 </button>
               </div>
 
-              {/* Zoom Controls */}
               <div className="flex items-center gap-1 bg-white border border-[#1E1E1E] px-2 py-0.5 shadow-[2px_2px_0px_#1E1E1E]">
-                <button
-                  onClick={() => setZoom((z) => Math.max(50, z - 25))}
-                  className="p-1 hover:bg-[#F0EEE6]">
+                <button onClick={() => setZoom((z) => Math.max(50, z - 25))} className="p-1 hover:bg-[#F0EEE6]">
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
                 <span className="font-bold text-[11px] w-9 text-center">{zoom}%</span>
-                <button
-                  onClick={() => setZoom((z) => Math.min(200, z + 25))}
-                  className="p-1 hover:bg-[#F0EEE6]">
+                <button onClick={() => setZoom((z) => Math.min(200, z + 25))} className="p-1 hover:bg-[#F0EEE6]">
                   <ZoomIn className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setZoom(100)}
-                  title="Reset Zoom"
-                  className="p-1 hover:bg-[#F0EEE6] text-[10px] font-bold border-l border-[#1E1E1E] ml-1 pl-1.5">
-                  100%
                 </button>
               </div>
             </div>
@@ -208,7 +208,7 @@ export default function DocumentViewerModal({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 font-mono text-xs bg-[#F4F2ED]">
-          {/* Passage Highlight Banner */}
+          {/* Highlight Banner */}
           {highlightText && (
             <div className="mb-3 p-3 bg-yellow-100 border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E]">
               <div className="flex items-center gap-2 mb-1">
@@ -222,63 +222,44 @@ export default function DocumentViewerModal({
           )}
 
           {activeTab === 'document' && (
-            <div className="w-full h-[65vh] border-2 border-[#1E1E1E] bg-[#EAE8E3] overflow-auto shadow-[4px_4px_0px_#1E1E1E] flex flex-col items-center justify-center relative p-4">
+            <div className="w-full h-[70vh] border-2 border-[#1E1E1E] bg-[#EAE8E3] overflow-auto shadow-[4px_4px_0px_#1E1E1E] flex flex-col items-center justify-center relative p-4">
               {loading ? (
                 <div className="flex flex-col items-center gap-3 text-[#1E1E1E]">
                   <Loader2 className="w-8 h-8 animate-spin text-[#DB4A2B]" />
-                  <p className="font-bold">Preparing presentation slides preview...</p>
+                  <p className="font-bold">Loading document view...</p>
                 </div>
-              ) : (previewMeta?.has_images || isImageFile) ? (
+              ) : isImageFile ? (
                 <div
                   className="transition-all duration-200 shadow-xl border-2 border-[#1E1E1E] bg-white max-h-full flex items-center justify-center overflow-hidden"
                   style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'center center' }}>
                   <img
-                    src={displayImgSrc}
-                    alt={isImageFile ? doc.filename : `Slide ${currentSlide}`}
-                    className="max-h-[58vh] max-w-full object-contain"
-                    onError={(e) => {
-                      if (isImageFile && (e.target as HTMLImageElement).src !== rawImageUrl) {
-                        (e.target as HTMLImageElement).src = rawImageUrl;
-                      }
-                    }}
+                    src={rawImageUrl}
+                    alt={doc.filename}
+                    className="max-h-[66vh] max-w-full object-contain"
                   />
                 </div>
-              ) : previewMeta?.has_pdf ? (
-                <iframe
-                  src={pdfPreviewUrl}
-                  title="PDF Preview"
-                  className="w-full h-full border-0"
-                />
               ) : (
-                /* Fallback text preview */
-                <div className="w-full h-full bg-white p-6 overflow-auto border border-[#1E1E1E]">
-                  <h3 className="font-bold text-sm mb-4 pb-2 border-b border-[#1E1E1E] text-[#DB4A2B]">
-                    EXTRACTED SLIDE CONTENT (SLIDE {currentSlide} / {totalPages})
-                  </h3>
-                  <pre className="font-mono text-xs whitespace-pre-wrap leading-relaxed text-[#1E1E1E]">
-                    {doc.full_text || 'No preview available.'}
-                  </pre>
-                </div>
+                <iframe src={pdfPreviewUrl} title="PDF Preview" className="w-full h-full border-0" />
               )}
             </div>
           )}
 
           {activeTab === 'chunks' && (
-            <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-2">
-              {doc.chunks && doc.chunks.length > 0 ? (
-                doc.chunks.map((c, i) => (
+            <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-2">
+              {docContent?.chunks && docContent.chunks.length > 0 ? (
+                docContent.chunks.map((c, i) => (
                   <div
                     key={c.chunk_id || i}
                     onClick={() => handleChunkClick(c.page_number || (i + 1))}
-                    className="p-3 bg-white border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E] hover:border-[#DB4A2B] hover:shadow-[3px_3px_0px_#DB4A2B] cursor-pointer transition-all">
-                    <div className="flex items-center justify-between border-b border-[#1E1E1E]/20 pb-1.5 mb-2">
-                      <span className="font-bold text-[#DB4A2B]">CHUNK #{i + 1}</span>
+                    className="p-4 bg-white border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E] hover:border-[#DB4A2B] hover:shadow-[3px_3px_0px_#DB4A2B] cursor-pointer transition-all">
+                    <div className="flex items-center justify-between border-b border-[#1E1E1E]/20 pb-2 mb-3">
+                      <span className="font-bold text-[#DB4A2B] font-mono">DOCUMENT CHUNK #{i + 1}</span>
                       <div className="flex items-center gap-2 font-mono text-[10px] text-[#1E1E1E]/70">
-                        {c.page_number && <span className="bg-[#E4E2DD] px-1.5 py-0.5 border border-[#1E1E1E]">SLIDE {c.page_number}</span>}
+                        {c.page_number && <span className="bg-[#E4E2DD] px-2 py-0.5 border border-[#1E1E1E] font-bold">PAGE {c.page_number}</span>}
                         <span>ID: {c.chunk_id}</span>
                       </div>
                     </div>
-                    <p className="text-xs leading-relaxed whitespace-pre-wrap font-mono">{c.text}</p>
+                    <p className="text-xs leading-relaxed whitespace-pre-wrap font-mono text-[#1E1E1E]">{c.text}</p>
                   </div>
                 ))
               ) : (
@@ -290,8 +271,8 @@ export default function DocumentViewerModal({
           )}
 
           {activeTab === 'full' && (
-            <div className="w-full h-[65vh] bg-white border-2 border-[#1E1E1E] p-6 overflow-auto shadow-[4px_4px_0px_#1E1E1E] flex flex-col">
-              {(!doc.full_text || doc.full_text.includes("OCR processing complete") || doc.status === 'failed') && (
+            <div className="w-full h-[70vh] bg-white border-2 border-[#1E1E1E] p-6 overflow-auto shadow-[4px_4px_0px_#1E1E1E] flex flex-col">
+              {(!rawOcrText || rawOcrText.includes("OCR processing complete") || doc.status === 'failed') && (
                 <div className="mb-4 p-4 bg-[#FFF5F2] border-2 border-[#DB4A2B] shadow-[3px_3px_0px_#DB4A2B] flex flex-col md:flex-row items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-[#DB4A2B]">
                     <AlertCircle className="w-5 h-5 shrink-0" />
@@ -320,7 +301,7 @@ export default function DocumentViewerModal({
                 </div>
               )}
               <pre className="font-mono text-xs whitespace-pre-wrap leading-relaxed text-[#1E1E1E] flex-1">
-                {doc.full_text || 'No text extracted.'}
+                {structuredOcrText || rawOcrText || 'No text extracted.'}
               </pre>
             </div>
           )}

@@ -12,7 +12,7 @@ from app.ingestion.chunker import chunk_text
 from app.ingestion.metadata import detect_dataset_type, extract_metadata
 from app.models.database import (
     add_to_chroma, delete_fts_by_document, delete_from_chroma,
-    get_document_by_path, insert_document, insert_fts_chunks,
+    get_document, get_document_by_path, insert_document, insert_fts_chunks,
     update_document,
 )
 from app.utils.hashing import hash_file
@@ -57,20 +57,42 @@ def _get_embed_service():
     return _embed_service
 
 
-def process_file(filepath: str | Path, force: bool = False) -> Optional[str]:
+def resolve_document_file_path(filepath: str | Path) -> Path:
+    """Resolve relative or absolute file_path to an existing absolute Path."""
+    p = Path(filepath)
+    if p.is_absolute() and p.exists():
+        return p
+
+    cwd = Path.cwd()
+    ds_base = Path(settings.DATASET_PATH) if hasattr(settings, "DATASET_PATH") else cwd / "dataset"
+
+    candidates = [
+        p,
+        cwd / p,
+        cwd / "backend" / p,
+        ds_base / p.name,
+        cwd / "dataset" / p.name,
+        cwd / "backend" / "dataset" / p.name,
+    ]
+    for cand in candidates:
+        try:
+            if cand.exists():
+                return cand.resolve()
+        except Exception:
+            continue
+    return p
+
+
+def process_file(filepath: str | Path, force: bool = False, target_doc_id: Optional[str] = None) -> Optional[str]:
     """Process a single file: parse → chunk → embed → store.
 
     Returns the document_id on success, or None on failure.
     """
-    filepath = Path(filepath)
-    if not filepath.exists():
-        # Fallback: check inside dataset directory
-        ds_path = Path(settings.DATASET_PATH) / filepath.name
-        if ds_path.exists():
-            filepath = ds_path
-        else:
-            log.warning("File not found: %s", filepath)
-            return None
+    resolved_path = resolve_document_file_path(filepath)
+    if not resolved_path.exists():
+        log.warning("File not found at resolved path: %s (original: %s)", resolved_path, filepath)
+        return None
+    filepath = resolved_path
 
     ext = filepath.suffix.lower()
     file_type = EXTENSION_TO_TYPE.get(ext)
@@ -80,17 +102,27 @@ def process_file(filepath: str | Path, force: bool = False) -> Optional[str]:
 
     # Check if already indexed with same hash
     file_hash = hash_file(filepath)
-    existing = get_document_by_path(str(filepath))
+    existing = None
+    if target_doc_id:
+        existing = get_document(target_doc_id)
+    if not existing:
+        existing = get_document_by_path(str(filepath))
+    if not existing:
+        existing = get_document_by_path(filepath.name)
 
-    if existing and existing["file_hash"] == file_hash and not force:
+    if existing and existing["file_hash"] == file_hash and not force and existing.get("status") == "indexed":
         log.info("File unchanged (hash match): %s", filepath.name)
         return existing["id"]
 
-    # If exists but hash changed, remove old data
+    # If exists or target_doc_id provided, remove old data & re-use ID
     if existing:
-        log.info("File changed, re-indexing: %s", filepath.name)
-        _remove_document_data(existing["id"])
         doc_id = existing["id"]
+        log.info("File re-indexing for document ID %s (%s)...", doc_id, filepath.name)
+        _remove_document_data(doc_id)
+    elif target_doc_id:
+        doc_id = target_doc_id
+        log.info("Forcing re-index for target document ID %s (%s)...", doc_id, filepath.name)
+        _remove_document_data(doc_id)
     else:
         meta = extract_metadata(filepath)
         doc_id = meta["id"]

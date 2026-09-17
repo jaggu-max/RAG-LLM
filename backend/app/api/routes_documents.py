@@ -68,6 +68,31 @@ async def get_document_content(doc_id: str):
     actual_chunks_count = len(chunks) if chunks else doc.get("chunks", 0)
     full_text = "\n\n--- CHUNK BREAK ---\n\n".join(c["text"] for c in chunks) if chunks else "No text extracted yet."
 
+    layout_blocks = []
+    raw_ocr_text = ""
+    structured_ocr_text = ""
+    if chunks:
+        for c in chunks:
+            meta = c.get("metadata") or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            if not raw_ocr_text and meta.get("raw_ocr"):
+                raw_ocr_text = meta.get("raw_ocr")
+            if not structured_ocr_text and meta.get("structured_ocr"):
+                structured_ocr_text = meta.get("structured_ocr")
+            lbs = meta.get("layout_blocks")
+            if lbs:
+                if isinstance(lbs, str):
+                    try:
+                        lbs = json.loads(lbs)
+                    except Exception:
+                        lbs = []
+                if isinstance(lbs, list):
+                    layout_blocks.extend(lbs)
+
     return {
         "id": doc["id"],
         "filename": doc["filename"],
@@ -76,6 +101,9 @@ async def get_document_content(doc_id: str):
         "chunks_count": actual_chunks_count,
         "status": doc.get("status", "pending"),
         "full_text": full_text,
+        "raw_ocr": raw_ocr_text or full_text,
+        "structured_ocr": structured_ocr_text or full_text,
+        "layout_blocks": layout_blocks,
         "chunks": chunks,
         "file_path": doc.get("file_path", ""),
     }
