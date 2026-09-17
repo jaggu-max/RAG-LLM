@@ -66,8 +66,24 @@ def init_db() -> None:
                     document_id,
                     text,
                     file_name,
-                    content='',
                     tokenize='porter unicode61'
+                );
+
+                CREATE TABLE IF NOT EXISTS structured_records (
+                    id                      TEXT PRIMARY KEY,
+                    document_id             TEXT NOT NULL,
+                    record_type             TEXT DEFAULT 'structured',
+                    identifier              TEXT NOT NULL,
+                    ps_code                 TEXT DEFAULT '',
+                    track                   TEXT DEFAULT '',
+                    problem_statement_title TEXT DEFAULT '',
+                    theme                   TEXT DEFAULT '',
+                    sponsoring_ministry     TEXT DEFAULT '',
+                    problem_statement       TEXT DEFAULT '',
+                    page_number             INTEGER DEFAULT 0,
+                    source_document         TEXT DEFAULT '',
+                    raw_text                TEXT DEFAULT '',
+                    created_at              TEXT NOT NULL
                 );
             """)
             conn.commit()
@@ -166,13 +182,39 @@ def insert_fts_chunks(chunks: List[Dict[str, Any]]) -> None:
     with _db_lock:
         conn = _get_conn()
         try:
-            conn.executemany(
-                "INSERT INTO chunks_fts (chunk_id, document_id, text, file_name) VALUES (?, ?, ?, ?)",
-                [(c["chunk_id"], c["document_id"], c["text"], c.get("file_name", "")) for c in chunks],
-            )
+            cleaned_params = [
+                (
+                    c["chunk_id"],
+                    c["document_id"],
+                    c["text"].replace("\x00", ""),
+                    c.get("file_name", "").replace("\x00", ""),
+                )
+                for c in chunks
+            ]
+            # Batch executemany to avoid locking
+            batch_size = 200
+            for i in range(0, len(cleaned_params), batch_size):
+                conn.executemany(
+                    "INSERT INTO chunks_fts (chunk_id, document_id, text, file_name) VALUES (?, ?, ?, ?)",
+                    cleaned_params[i:i + batch_size],
+                )
             conn.commit()
         finally:
             conn.close()
+
+
+def get_document_chunks(doc_id: str) -> List[Dict[str, Any]]:
+    """Retrieve indexed text chunks for a document from FTS."""
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT chunk_id, document_id, text, file_name FROM chunks_fts WHERE document_id = ?",
+            (doc_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
 
 
 def delete_fts_by_document(doc_id: str) -> None:
@@ -183,6 +225,57 @@ def delete_fts_by_document(doc_id: str) -> None:
             conn.commit()
         finally:
             conn.close()
+
+
+def insert_structured_records(records: List[Dict[str, Any]]) -> None:
+    """Insert structured records into database."""
+    if not records:
+        return
+    with _db_lock:
+        conn = _get_conn()
+        try:
+            params = [
+                (
+                    r.get("id") or f"{r['document_id']}_{r.get('identifier', '')}_{i}",
+                    r["document_id"],
+                    r.get("record_type", "structured"),
+                    r.get("identifier", ""),
+                    r.get("ps_code", ""),
+                    r.get("track", ""),
+                    r.get("problem_statement_title", ""),
+                    r.get("theme", ""),
+                    r.get("sponsoring_ministry", ""),
+                    r.get("problem_statement", ""),
+                    r.get("page_number", 0),
+                    r.get("source_document", ""),
+                    r.get("raw_text", ""),
+                    datetime.now(timezone.utc).isoformat(),
+                )
+                for i, r in enumerate(records)
+            ]
+            conn.executemany(
+                """INSERT OR REPLACE INTO structured_records
+                   (id, document_id, record_type, identifier, ps_code, track,
+                    problem_statement_title, theme, sponsoring_ministry,
+                    problem_statement, page_number, source_document, raw_text, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                params,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def delete_structured_records_by_document(doc_id: str) -> None:
+    """Delete structured records associated with a document."""
+    with _db_lock:
+        conn = _get_conn()
+        try:
+            conn.execute("DELETE FROM structured_records WHERE document_id = ?", (doc_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
 
 
 def search_fts(query: str, limit: int = 20) -> List[Dict[str, Any]]:
@@ -302,15 +395,25 @@ def get_collection() -> chromadb.Collection:
 def add_to_chroma(ids: List[str], embeddings: List[List[float]],
                    documents: List[str], metadatas: List[Dict[str, Any]]) -> None:
     collection = get_collection()
-    # ChromaDB batch limit is 5000
-    batch_size = 5000
+    cleaned_docs = [d.replace("\x00", "") for d in documents]
+    cleaned_metas = []
+    for m in metadatas:
+        clean_m = {}
+        for k, v in m.items():
+            if isinstance(v, str):
+                clean_m[k] = v.replace("\x00", "")
+            else:
+                clean_m[k] = v
+        cleaned_metas.append(clean_m)
+
+    batch_size = 2000
     for i in range(0, len(ids), batch_size):
         end = i + batch_size
         collection.add(
             ids=ids[i:end],
             embeddings=embeddings[i:end],
-            documents=documents[i:end],
-            metadatas=metadatas[i:end],
+            documents=cleaned_docs[i:end],
+            metadatas=cleaned_metas[i:end],
         )
 
 

@@ -121,9 +121,24 @@ def process_file(filepath: str | Path, force: bool = False) -> Optional[str]:
             log.warning("No content extracted from: %s", filepath.name)
             return None
 
-        # 2. Detect dataset type
+        # 2. Detect dataset type & extract structured records
         all_text = "\n\n".join(text for text, _ in parsed_sections)
         dataset_type = detect_dataset_type(filepath, all_text)
+
+        # Extract structured records if PDF
+        structured_records = []
+        if file_type == "pdf":
+            try:
+                from app.ingestion.parsers.pdf import extract_structured_records_from_pages
+                structured_records = extract_structured_records_from_pages(
+                    parsed_sections, filepath.name, doc_id
+                )
+                if structured_records:
+                    from app.models.database import insert_structured_records
+                    insert_structured_records(structured_records)
+                    log.info("Saved %d structured records for %s", len(structured_records), filepath.name)
+            except Exception as sr_err:
+                log.warning("Structured record extraction failed: %s", sr_err)
 
         # 3. Chunk
         all_chunks = []
@@ -137,6 +152,28 @@ def process_file(filepath: str | Path, force: bool = False) -> Optional[str]:
             }
             chunks = chunk_text(section_text, chunk_meta, doc_id)
             all_chunks.extend(chunks)
+
+        # Also add structured records as dedicated high-priority chunks
+        if structured_records:
+            for sr in structured_records:
+                sr_text = f"PS CODE: {sr['ps_code']}\nTITLE: {sr['problem_statement_title']}\nTRACK: {sr['track']}\nTHEME: {sr['theme']}\nSPONSOR: {sr['sponsoring_ministry']}\nPROBLEM STATEMENT: {sr['problem_statement']}"
+                all_chunks.append({
+                    "chunk_id": sr["id"],
+                    "document_id": doc_id,
+                    "text": sr_text,
+                    "metadata": {
+                        "file_name": filepath.name,
+                        "file_type": file_type,
+                        "file_path": str(filepath),
+                        "dataset_type": dataset_type,
+                        "page_number": sr["page_number"],
+                        "identifier": sr["identifier"],
+                        "ps_code": sr["ps_code"],
+                        "record_type": "structured",
+                        "chunk_id": sr["id"],
+                        "document_id": doc_id,
+                    },
+                })
 
         if not all_chunks:
             update_document(doc_id, status="failed", error_message="Chunking produced no results")
@@ -164,7 +201,7 @@ def process_file(filepath: str | Path, force: bool = False) -> Optional[str]:
             indexed_at=__import__("app.utils.dates", fromlist=["now_iso"]).now_iso(),
         )
 
-        log.info("✓ Indexed: %s → %d chunks [%s]", filepath.name, len(all_chunks), dataset_type)
+        log.info("✓ Indexed: %s → %d chunks [%s] (%d structured records)", filepath.name, len(all_chunks), dataset_type, len(structured_records))
         return doc_id
 
     except Exception as e:
@@ -186,9 +223,12 @@ def remove_file(filepath: str | Path) -> None:
 
 
 def _remove_document_data(doc_id: str) -> None:
-    """Remove chunks from ChromaDB and FTS5."""
+    """Remove chunks from ChromaDB, FTS5, and structured_records."""
     delete_from_chroma(doc_id)
     delete_fts_by_document(doc_id)
+    from app.models.database import delete_structured_records_by_document
+    delete_structured_records_by_document(doc_id)
+
 
 
 def reindex_document(doc_id: str) -> Optional[str]:

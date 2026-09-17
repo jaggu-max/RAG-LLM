@@ -1,74 +1,88 @@
-"""Confidence scoring — evaluates retrieval quality."""
+"""Confidence scorer — calculates retrieval confidence with identifier awareness."""
 
 from __future__ import annotations
 
-from typing import List
+import re
+from typing import List, Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.schemas import RetrievedChunk
+from app.rag.query_router import QueryPlan
 
 log = get_logger(__name__)
 
 
-def calculate_confidence(chunks: List[RetrievedChunk], query: str) -> float:
-    """Calculate normalized confidence score (0.0–1.0) from retrieval results.
-
-    Factors:
-    1. Top chunk score (40%)
-    2. Score consistency across chunks (20%)
-    3. Number of supporting chunks (20%)
-    4. Query term coverage in chunks (20%)
-    """
+def calculate_confidence(
+    chunks: List[RetrievedChunk],
+    query: str,
+    plan: Optional[QueryPlan] = None,
+) -> float:
+    """Calculate overall retrieval confidence."""
     if not chunks:
         return 0.0
 
-    # Factor 1: Top chunk score (40%)
+    # ── Check for exact identifier matches ──
+    has_exact_match = False
+    has_structured_record = False
+
+    canonical_ids = set()
+    if plan and plan.identifiers:
+        for ident in plan.identifiers:
+            canonical_ids.add(re.sub(r'[\s\-_]', '', ident).upper())
+    else:
+        # Extract from query as fallback
+        from app.rag.query_router import extract_identifiers
+        ids = extract_identifiers(query)
+        for ident in ids:
+            canonical_ids.add(re.sub(r'[\s\-_]', '', ident).upper())
+
+    if canonical_ids:
+        for chunk in chunks:
+            text_upper = chunk.text.upper().replace(" ", "").replace("-", "").replace("_", "")
+            meta_id = str(chunk.metadata.get("identifier", "")).upper().replace(" ", "")
+            meta_ps = str(chunk.metadata.get("ps_code", "")).upper().replace(" ", "")
+
+            for cid in canonical_ids:
+                if cid == meta_id or cid == meta_ps or cid in text_upper:
+                    has_exact_match = True
+                    if chunk.source == "structured_record":
+                        has_structured_record = True
+                    break
+
+    # ── Exact identifier → very high confidence ──
+    if has_structured_record:
+        return 0.98
+
+    if has_exact_match:
+        return 0.95
+
+    # ── Standard confidence calculation ──
+    if not chunks:
+        return 0.0
+
     top_score = chunks[0].score
-    factor_top = min(1.0, top_score)
+    avg_score = sum(c.score for c in chunks[:5]) / min(len(chunks), 5)
 
-    # Factor 2: Score consistency (20%) — are multiple chunks agreeing?
-    if len(chunks) >= 2:
-        scores = [c.score for c in chunks[:5]]
-        avg_score = sum(scores) / len(scores)
-        factor_consistency = min(1.0, avg_score)
-    else:
-        factor_consistency = factor_top * 0.5
+    # Weight: top score matters most
+    confidence = top_score * 0.6 + avg_score * 0.4
 
-    # Factor 3: Number of supporting chunks (20%)
-    n_chunks = len(chunks)
-    if n_chunks >= 4:
-        factor_support = 1.0
-    elif n_chunks >= 2:
-        factor_support = 0.7
-    elif n_chunks == 1:
-        factor_support = 0.4
-    else:
-        factor_support = 0.0
+    # Penalty for very few results
+    if len(chunks) == 1:
+        confidence *= 0.85
+    elif len(chunks) == 2:
+        confidence *= 0.92
 
-    # Factor 4: Query term coverage (20%)
-    query_terms = set(query.lower().split())
-    if query_terms:
-        all_text = " ".join(c.text.lower() for c in chunks[:5])
-        matched = sum(1 for t in query_terms if t in all_text)
-        factor_coverage = matched / len(query_terms)
-    else:
-        factor_coverage = 0.5
+    # Single-word query boost (user knows what they want)
+    if len(query.strip().split()) <= 2 and top_score > 0.5:
+        confidence = max(confidence, 0.80)
 
-    # Weighted combination
-    confidence = (
-        factor_top * 0.40
-        + factor_consistency * 0.20
-        + factor_support * 0.20
-        + factor_coverage * 0.20
-    )
+    # Clamp
+    confidence = max(0.0, min(1.0, confidence))
 
-    confidence = round(min(1.0, max(0.0, confidence)), 4)
-
-    log.info("Confidence: %.2f (top=%.2f, consist=%.2f, support=%.2f, coverage=%.2f)",
-             confidence, factor_top, factor_consistency, factor_support, factor_coverage)
-    return confidence
+    return round(confidence, 4)
 
 
 def is_confident_enough(confidence: float) -> bool:
+    """Check if confidence meets the threshold."""
     return confidence >= settings.CONFIDENCE_THRESHOLD

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import AsyncGenerator, Optional
 
-from app.services.gemini_provider import gemini_provider
+from app.providers.gemini_provider import gemini_provider
+
 
 
 def generate(

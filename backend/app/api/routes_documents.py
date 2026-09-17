@@ -56,6 +56,50 @@ async def get_document(doc_id: str):
     )
 
 
+@router.get("/documents/{doc_id}/content")
+async def get_document_content(doc_id: str):
+    """Get document details along with indexed text chunks for the viewer modal."""
+    doc = get_document_by_id(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    from app.models.database import get_document_chunks
+    chunks = get_document_chunks(doc_id)
+    actual_chunks_count = len(chunks) if chunks else doc.get("chunks", 0)
+    full_text = "\n\n--- CHUNK BREAK ---\n\n".join(c["text"] for c in chunks) if chunks else "No text extracted yet."
+
+    return {
+        "id": doc["id"],
+        "filename": doc["filename"],
+        "file_type": doc["file_type"],
+        "size_bytes": doc.get("size_bytes", 0),
+        "chunks_count": actual_chunks_count,
+        "status": doc.get("status", "pending"),
+        "full_text": full_text,
+        "chunks": chunks,
+        "file_path": doc.get("file_path", ""),
+    }
+
+
+@router.get("/documents/{doc_id}/file")
+async def serve_document_file(doc_id: str):
+    """Serve the raw uploaded document file (PDF, TXT, DOCX, etc.) for direct browser view."""
+    doc = get_document_by_id(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    file_path = Path(doc["file_path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Physical file missing on server")
+
+    media_type = "application/pdf" if doc["file_type"] == "pdf" else None
+    headers = {"Content-Disposition": f"inline; filename=\"{doc['filename']}\""}
+    return FileResponse(path=str(file_path), media_type=media_type, headers=headers)
+
+
 @router.post("/documents/upload", response_model=DocumentUploadResponse)
 async def upload(file: UploadFile = File(...)):
     """Upload a document for ingestion."""

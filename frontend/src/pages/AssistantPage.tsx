@@ -41,12 +41,19 @@ export default function AssistantPage({
   };
 
   const updateMessages = (newMsgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    setMessages(prev => {
-      const updated = typeof newMsgs === 'function' ? newMsgs(prev) : newMsgs;
-      setDraftMessages?.(updated);
-      return updated;
-    });
+    setMessages(newMsgs);
   };
+
+  // Sync draft messages with App parent state cleanly after render
+  const activeConvRef = useRef<string | null>(activeConversationId || null);
+
+  useEffect(() => {
+    activeConvRef.current = activeConversationId || null;
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    setDraftMessages?.(messages);
+  }, [messages]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,40 +61,53 @@ export default function AssistantPage({
 
   useEffect(() => {
     if (!activeConversationId) {
-      if (draftMessages.length > 0) {
+      if (draftMessages.length > 0 && messages.length === 0) {
         setMessages(draftMessages);
       }
       return;
     }
+
+    // Only load from backend if switching conversations, not when appending to current active thread
     const loadConversation = async () => {
       try {
         const conv = await getConversation(activeConversationId);
         if (conv && conv.messages) {
-          const loadedMsgs: ChatMessage[] = conv.messages.map(m => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            timestamp: new Date(m.created_at),
-            response: m.model ? {
-              answer: m.content,
-              answer_type: (m.answer_type as any) || 'dataset',
-              confidence: m.confidence || 0,
-              model: m.model || selectedModel,
-              sources: [],
-              retrieval: { semantic_results: 0, keyword_results: 0, reranked_results: 0 },
-              response_time_ms: 0,
-              conversation_id: activeConversationId,
-            } : undefined
-          }));
-          updateMessages(loadedMsgs);
+          const loadedMsgs: ChatMessage[] = conv.messages.map(m => {
+            const rawSources = (m as any).sources;
+            let parsedSources: any[] = [];
+            if (rawSources) {
+              try {
+                parsedSources = typeof rawSources === 'string' ? JSON.parse(rawSources) : rawSources;
+              } catch (e) {
+                parsedSources = [];
+              }
+            }
+            return {
+              id: m.id,
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+              timestamp: new Date(m.created_at),
+              response: m.model ? {
+                answer: m.content,
+                answer_type: (m.answer_type as any) || 'dataset',
+                confidence: m.confidence || 0,
+                model: m.model || selectedModel,
+                sources: Array.isArray(parsedSources) ? parsedSources : [],
+                retrieval: { semantic_results: 0, keyword_results: 0, reranked_results: 0 },
+                response_time_ms: 0,
+                conversation_id: activeConversationId,
+              } : undefined
+            };
+          });
+          setMessages(loadedMsgs);
         }
       } catch (err) {
-        console.error('Failed to load conversation history:', err);
+        console.warn('Conversation not found or deleted:', activeConversationId);
       }
     };
+
     loadConversation();
   }, [activeConversationId]);
-
 
   const currentModel = models.find(m => m.id === selectedModel);
 
@@ -127,10 +147,11 @@ export default function AssistantPage({
       };
       updateMessages(prev => [...prev, aiMsg]);
     } catch (err: any) {
+      const errText = err.response?.data?.detail || err.message || 'An error occurred.';
       const errMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: err.response?.data?.detail || err.message || 'An error occurred.',
+        content: errText,
         timestamp: new Date(),
       };
       updateMessages(prev => [...prev, errMsg]);
@@ -138,6 +159,8 @@ export default function AssistantPage({
       setLoading(false);
     }
   };
+
+
 
   const suggestions = [
     "Summarize the most important information in my dataset",
@@ -166,9 +189,10 @@ export default function AssistantPage({
             onClick={() => setShowModelMenu(!showModelMenu)}
             className="flex items-center gap-2.5 px-3.5 py-1.5 bg-white border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E] hover:shadow-[5px_5px_0px_#1E1E1E] transition-all text-xs font-bold uppercase"
           >
-            <Circle className={`w-2.5 h-2.5 fill-current ${currentModel?.available ? 'text-[#DB4A2B]' : 'text-gray-400'}`} />
-            <span className="text-[#1E1E1E]">{currentModel?.name || selectedModel}</span>
+            <Circle className={`w-2.5 h-2.5 fill-current ${currentModel?.available !== false ? 'text-[#DB4A2B]' : 'text-gray-400'}`} />
+            <span className="text-[#1E1E1E]">{currentModel?.name || (selectedModel === 'local_qwen' ? 'Ollama (gemma3:4b)' : selectedModel)}</span>
             <ChevronDown className="w-3.5 h-3.5 text-[#1E1E1E]" />
+
           </button>
 
           {showModelMenu && (

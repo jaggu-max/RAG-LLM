@@ -49,10 +49,15 @@ def init_conversation_db() -> None:
                 model TEXT,
                 answer_type TEXT,
                 confidence REAL,
+                sources TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
             );
         """)
+        try:
+            cursor.execute("ALTER TABLE messages ADD COLUMN sources TEXT;")
+        except Exception:
+            pass
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages (conversation_id);")
         conn.commit()
 
@@ -82,6 +87,7 @@ def list_conversations() -> List[Dict[str, Any]]:
 
 def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     """Get a conversation by ID along with its full message history."""
+    import json
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?", (conversation_id,))
@@ -91,13 +97,24 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
 
         conv = dict(conv_row)
         cursor.execute("""
-            SELECT id, conversation_id, role, content, model, answer_type, confidence, created_at
+            SELECT id, conversation_id, role, content, model, answer_type, confidence, sources, created_at
             FROM messages
             WHERE conversation_id = ?
             ORDER BY created_at ASC
         """, (conversation_id,))
         msg_rows = cursor.fetchall()
-        conv["messages"] = [dict(r) for r in msg_rows]
+        messages = []
+        for r in msg_rows:
+            d = dict(r)
+            if d.get("sources"):
+                try:
+                    d["sources"] = json.loads(d["sources"]) if isinstance(d["sources"], str) else d["sources"]
+                except Exception:
+                    d["sources"] = []
+            else:
+                d["sources"] = []
+            messages.append(d)
+        conv["messages"] = messages
         return conv
 
 
@@ -118,10 +135,13 @@ def add_message(
     model: str = "",
     answer_type: str = "",
     confidence: float = 0.0,
+    sources: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Add a message to a conversation and update the conversation timestamp and title if needed."""
+    import json
     msg_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    sources_json = json.dumps(sources) if sources is not None and not isinstance(sources, str) else (sources or "")
     with get_connection() as conn:
         cursor = conn.cursor()
         # Ensure conversation exists
@@ -146,9 +166,9 @@ def add_message(
                 cursor.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
 
         cursor.execute("""
-            INSERT INTO messages (id, conversation_id, role, content, model, answer_type, confidence, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (msg_id, conversation_id, role, content, model, answer_type, confidence, now))
+            INSERT INTO messages (id, conversation_id, role, content, model, answer_type, confidence, sources, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (msg_id, conversation_id, role, content, model, answer_type, confidence, sources_json, now))
         conn.commit()
 
     return {

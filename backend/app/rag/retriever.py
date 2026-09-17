@@ -35,11 +35,13 @@ def semantic_search(query: str, top_k: int | None = None) -> List[RetrievedChunk
         # Convert cosine distance to similarity (ChromaDB returns distance)
         similarity = max(0.0, 1.0 - distances[i])
         meta = metadatas[i] if i < len(metadatas) else {}
+        if meta is None:
+            meta = {}
 
         chunks.append(RetrievedChunk(
-            chunk_id=chunk_id,
-            document_id=meta.get("document_id", ""),
-            text=documents[i] if i < len(documents) else "",
+            chunk_id=chunk_id or "",
+            document_id=meta.get("document_id") or "",
+            text=(documents[i] if i < len(documents) else "") or "",
             score=round(similarity, 4),
             metadata=meta,
             source="semantic",

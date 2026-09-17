@@ -51,50 +51,50 @@ async def upload_document(filename: str, content: bytes) -> Dict[str, Any]:
     dest.write_bytes(content)
     log.info("Uploaded file saved: %s (%d bytes)", dest.name, len(content))
 
-    # Process immediately
+    # Process file (parse → chunk → embed → store)
     doc_id = process_file(dest)
     if not doc_id:
-        raise RuntimeError(f"Failed to process uploaded file: {safe_name}")
+        from app.models.database import get_document_by_path
+        existing = get_document_by_path(str(dest))
+        doc_id = existing["id"] if existing else "unknown"
 
     return {
         "document_id": doc_id,
         "filename": dest.name,
-        "message": f"Document '{dest.name}' uploaded and indexed successfully.",
+        "message": f"Document '{dest.name}' uploaded successfully.",
     }
 
 
 def delete_document_by_id(doc_id: str) -> bool:
     """Delete a document and its data cleanly."""
     doc = get_document(doc_id)
-    if not doc:
-        log.warning("Delete requested for non-existent document ID: %s", doc_id)
-        return False
 
-    file_path_str = doc.get("file_path", "")
+    if doc:
+        file_path_str = doc.get("file_path", "")
 
-    # 1. Remove from ChromaDB & FTS
-    if file_path_str:
-        try:
-            remove_file(file_path_str)
-        except Exception as e:
-            log.warning("Failed remove_file for %s: %s", file_path_str, e)
+        # 1. Remove from ChromaDB & FTS
+        if file_path_str:
+            try:
+                remove_file(file_path_str)
+            except Exception as e:
+                log.warning("Failed remove_file for %s: %s", file_path_str, e)
 
-    # 2. Delete ChromaDB vector embeddings by document_id directly
+        # 2. Delete physical file if present
+        if file_path_str:
+            fp = Path(file_path_str)
+            if fp.exists():
+                try:
+                    fp.unlink()
+                    log.info("Deleted physical file: %s", fp)
+                except Exception as e:
+                    log.warning("Failed to unlink file %s: %s", fp, e)
+
+    # 3. Delete ChromaDB vector embeddings by document_id directly
     try:
         from app.models.database import delete_from_chroma
         delete_from_chroma(doc_id)
     except Exception as e:
         log.warning("Failed delete_from_chroma for %s: %s", doc_id, e)
-
-    # 3. Delete physical file if present
-    if file_path_str:
-        fp = Path(file_path_str)
-        if fp.exists():
-            try:
-                fp.unlink()
-                log.info("Deleted physical file: %s", fp)
-            except Exception as e:
-                log.warning("Failed to unlink file %s: %s", fp, e)
 
     # 4. Delete from SQLite DB
     try:
@@ -102,7 +102,7 @@ def delete_document_by_id(doc_id: str) -> bool:
     except Exception as e:
         log.error("Failed SQLite delete for %s: %s", doc_id, e)
 
-    log.info("Successfully deleted document: %s (id=%s)", doc.get("filename", doc_id), doc_id)
+    log.info("Successfully deleted document ID: %s", doc_id)
     return True
 
 

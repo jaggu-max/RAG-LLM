@@ -136,9 +136,9 @@ export default function Sidebar({
         <p className="font-mono text-[9px] font-bold tracking-widest text-[#1E1E1E]/60 uppercase mb-2.5">System Nodes</p>
         <div className="space-y-2">
           <StatusRow label="Backend API" status={health?.backend || 'online'} />
-          <StatusRow label="Gemini AI" status={health?.gemini || 'ready'} />
-          <StatusRow label="Local Qwen" status={health?.lmstudio || 'ready'} extra="Local" />
+          <StatusRow label="Ollama AI (gemma3:4b)" status={health?.lmstudio || 'ready'} extra={['online', 'ready', 'running', 'ok'].includes((health?.lmstudio || 'ready').toLowerCase()) ? 'LOCAL' : undefined} />
         </div>
+
       </div>
     </aside>
   );

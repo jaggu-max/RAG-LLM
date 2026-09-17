@@ -99,6 +99,7 @@ def create_app() -> FastAPI:
     from app.api.routes_models import router as models_router
     from app.api.routes_reindex import router as reindex_router
     from app.api.routes_conversations import router as conversations_router
+    from app.api.routes_debug import router as debug_router
 
     app.include_router(health_router, prefix="/api", tags=["Health"])
     app.include_router(chat_router, prefix="/api", tags=["Chat"])
@@ -107,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(models_router, prefix="/api", tags=["Models"])
     app.include_router(reindex_router, prefix="/api", tags=["Reindex"])
     app.include_router(conversations_router, prefix="/api", tags=["Conversations"])
+    app.include_router(debug_router, prefix="/api", tags=["Debug"])
 
     return app
 

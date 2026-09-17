@@ -11,12 +11,24 @@ import type { HealthStatus, ModelInfo, Conversation } from './types';
 function App() {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [selectedModel, setSelectedModel] = useState('gemini');
+  const [selectedModel, setSelectedModel] = useState('local_qwen');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationIdState] = useState<string | null>(() => {
+    return localStorage.getItem('nexus_active_conv_id') || null;
+  });
   const [draftInput, setDraftInput] = useState('');
   const [draftMessages, setDraftMessages] = useState<any[]>([]);
+
+  const setActiveConversationId = (id: string | null) => {
+    setActiveConversationIdState(id);
+    if (id) {
+      localStorage.setItem('nexus_active_conv_id', id);
+    } else {
+      localStorage.removeItem('nexus_active_conv_id');
+    }
+  };
 
   const fetchStatus = async () => {
     try {
@@ -26,8 +38,12 @@ function App() {
         getConversations(),
       ]);
       if (healthRes.status === 'fulfilled') setHealth(healthRes.value);
-      if (modelsRes.status === 'fulfilled') setModels(modelsRes.value.models);
+      if (modelsRes.status === 'fulfilled') {
+        setModels(modelsRes.value.models);
+      }
       if (convsRes.status === 'fulfilled') setConversations(convsRes.value.conversations || []);
+
+
     } catch (e) {
       console.error('Failed to fetch status:', e);
     }
@@ -81,7 +97,8 @@ function App() {
   };
 
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+
       <div className="flex h-screen bg-[#E4E2DD] text-[#1E1E1E] overflow-hidden">
         {/* Mobile overlay */}
         {sidebarOpen && (

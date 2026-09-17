@@ -1,4 +1,4 @@
-"""RAG pipeline orchestrator — the main intelligence layer."""
+"""RAG pipeline orchestrator — the main intelligence layer with query routing."""
 
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ from app.models.schemas import (
 from app.rag.confidence import calculate_confidence, is_confident_enough
 from app.rag.context_builder import build_context
 from app.rag.hybrid_search import hybrid_search
-from app.rag.prompts import GENERAL_KNOWLEDGE_PROMPT, SYSTEM_PROMPT
+from app.rag.prompts import GENERAL_KNOWLEDGE_PROMPT, get_prompt_for_intent
+from app.rag.query_router import QueryIntent, QueryPlan, route_query
 from app.rag.reranker import rerank
 from app.rag.validator import build_insufficient_response, validate_response
 
@@ -30,22 +31,23 @@ from app.models.conversation_db import (
 
 def _get_llm_functions(model: str):
     """Return (generate, stream_generate, display_model) for the given model option."""
-    if model.lower() == "gemini" or model.startswith("gemini"):
-        from app.services import gemini_service
-        return gemini_service.generate, gemini_service.stream_generate, "gemini"
-    else:
-        from app.services import lmstudio_service
-        return lmstudio_service.generate, lmstudio_service.stream_generate, "local_qwen"
+    from app.providers.local_qwen_provider import local_qwen_provider
+    active_model = local_qwen_provider.get_selected_model()
+    return local_qwen_provider.generate, local_qwen_provider.stream_generate, active_model
+
+
+def _get_conversation_history(conversation_id: str) -> List[dict]:
+    """Get recent conversation history for follow-up resolution."""
+    limit = getattr(settings, "CONVERSATION_MEMORY_LIMIT", 10)
+    return get_recent_messages(conversation_id, limit=limit)
 
 
 def _preprocess_query(query: str, conversation_id: str) -> str:
     """Preprocess query — include recent conversation history context for follow-up resolution."""
-    limit = getattr(settings, "CONVERSATION_MEMORY_LIMIT", 10)
-    history = get_recent_messages(conversation_id, limit=limit)
+    history = _get_conversation_history(conversation_id)
     if not history:
         return query
 
-    # Format recent conversation history into query context
     history_lines = []
     for msg in history:
         role = "User" if msg["role"] == "user" else "Assistant"
@@ -64,62 +66,58 @@ def process_query(request: ChatRequest) -> ChatResponse:
     query = request.message
     model = request.model
 
-    # Get LLM functions
     generate_fn, _, model_name = _get_llm_functions(model)
 
     try:
-        # Step 1: Preprocess query
-        processed_query = _preprocess_query(query, conversation_id)
-        log.info("Query: %s | Model: %s", query[:100], model)
+        # Step 1: Get conversation history
+        history = _get_conversation_history(conversation_id)
 
-        # Step 2: Check if knowledge base should be used
+        # Step 2: Route the query
+        plan = route_query(query, conversation_history=history)
+        log.info(
+            "Pipeline: intent=%s identifiers=%s fields=%s",
+            plan.intent.value, plan.identifiers, plan.target_fields,
+        )
+
+        # Step 3: Check if knowledge base should be used
         if not request.use_knowledge_base or chroma_count() == 0:
             return _general_knowledge_response(
                 query, generate_fn, model_name, conversation_id, start_time
             )
 
-        # Step 3: Hybrid retrieval
-        candidates, semantic_count, keyword_count = hybrid_search(processed_query)
+        # Step 4: Determine effective search query
+        search_query = query
+        if plan.resolved_query:
+            search_query = plan.resolved_query
+        elif plan.intent == QueryIntent.FOLLOW_UP:
+            # Use context-enriched query for follow-ups
+            search_query = _preprocess_query(query, conversation_id)
 
-        # Step 4: Rerank
-        reranked = rerank(processed_query, candidates)
+        # Step 5: Multi-strategy hybrid retrieval
+        candidates, semantic_count, keyword_count = hybrid_search(
+            search_query, plan=plan
+        )
+
+        # Step 6: Rerank with intent awareness
+        reranked = rerank(search_query, candidates, plan=plan)
+        if not reranked and candidates:
+            reranked = candidates[:10]
         reranked_count = len(reranked)
 
-        # Step 5: Calculate confidence
-        confidence = calculate_confidence(reranked, processed_query)
+        # Step 7: Calculate confidence
+        confidence = calculate_confidence(reranked, query, plan=plan) if reranked else 0.0
 
-        # Step 6: Decision — dataset or general knowledge?
-        if not reranked or not is_confident_enough(confidence):
-            log.info("Low confidence (%.2f) — switching to general knowledge", confidence)
-            return _general_knowledge_response(
-                query, generate_fn, model_name, conversation_id, start_time,
-                retrieval=RetrievalInfo(
-                    semantic_results=semantic_count,
-                    keyword_results=keyword_count,
-                    reranked_results=reranked_count,
-                ),
-            )
+        # Step 8: Build context with plan awareness
+        context = build_context(reranked, plan=plan) if reranked else "No matching documents found."
 
-        # Step 7: Build context
-        context = build_context(reranked)
+        # Step 9: Select prompt based on intent
+        prompt_template = get_prompt_for_intent(plan.intent)
+        system = prompt_template.format(context=context)
 
-        # Step 8: Generate answer
-        system = SYSTEM_PROMPT.format(context=context)
+        # Step 10: Generate answer
         answer = generate_fn(query, system_prompt=system, model_name=model_name)
 
-        # Step 9: Validate
-        if not validate_response(answer, context):
-            log.warning("Validation failed — regenerating with stricter prompt")
-            answer = generate_fn(
-                f"STRICTLY answer only from the context. Question: {query}",
-                system_prompt=system,
-                model_name=model_name,
-            )
-            if not validate_response(answer, context):
-                answer = build_insufficient_response()
-                confidence = 0.3
-
-        # Step 10: Build sources
+        # Step 11: Build sources
         sources = _build_sources(reranked)
 
         elapsed = int((time.time() - start_time) * 1000)
@@ -128,7 +126,11 @@ def process_query(request: ChatRequest) -> ChatResponse:
         log_query(query, "dataset", confidence, model_name, elapsed)
 
         # Store in conversation
-        _store_conversation(conversation_id, query, answer, model=model_name, answer_type="dataset", confidence=confidence)
+        _store_conversation(
+            conversation_id, query, answer,
+            model=model_name, answer_type="dataset", confidence=confidence,
+            sources=[s.model_dump() for s in sources] if sources else []
+        )
 
         return ChatResponse(
             answer=answer,
@@ -155,6 +157,7 @@ def process_query(request: ChatRequest) -> ChatResponse:
             response_time_ms=elapsed,
             conversation_id=conversation_id,
         )
+
     except Exception as e:
         log.error("Pipeline error: %s", e, exc_info=True)
         elapsed = int((time.time() - start_time) * 1000)
@@ -180,29 +183,36 @@ async def process_query_stream(request: ChatRequest) -> AsyncGenerator[str, None
     _, stream_fn, model_name = _get_llm_functions(model)
 
     try:
-        processed_query = _preprocess_query(query, conversation_id)
+        # Route the query
+        history = _get_conversation_history(conversation_id)
+        plan = route_query(query, conversation_history=history)
 
         # Retrieval
         if not request.use_knowledge_base or chroma_count() == 0:
             system = GENERAL_KNOWLEDGE_PROMPT
-            context = ""
             answer_type = "general_knowledge"
             confidence = 0.0
             sources = []
             retrieval = {"semantic_results": 0, "keyword_results": 0, "reranked_results": 0}
         else:
-            candidates, sc, kc = hybrid_search(processed_query)
-            reranked = rerank(processed_query, candidates)
-            confidence = calculate_confidence(reranked, processed_query)
+            search_query = query
+            if plan.resolved_query:
+                search_query = plan.resolved_query
+            elif plan.intent == QueryIntent.FOLLOW_UP:
+                search_query = _preprocess_query(query, conversation_id)
+
+            candidates, sc, kc = hybrid_search(search_query, plan=plan)
+            reranked = rerank(search_query, candidates, plan=plan)
+            confidence = calculate_confidence(reranked, query, plan=plan)
 
             if not reranked or not is_confident_enough(confidence):
                 system = GENERAL_KNOWLEDGE_PROMPT
-                context = ""
                 answer_type = "general_knowledge"
                 sources = []
             else:
-                context = build_context(reranked)
-                system = SYSTEM_PROMPT.format(context=context)
+                context = build_context(reranked, plan=plan)
+                prompt_template = get_prompt_for_intent(plan.intent)
+                system = prompt_template.format(context=context)
                 answer_type = "dataset"
                 sources = [s.model_dump() for s in _build_sources(reranked)]
 
@@ -228,9 +238,8 @@ async def process_query_stream(request: ChatRequest) -> AsyncGenerator[str, None
 
         elapsed = int((time.time() - start_time) * 1000)
         log_query(query, answer_type, confidence, model_name, elapsed)
-        _store_conversation(conversation_id, query, full_answer)
+        _store_conversation(conversation_id, query, full_answer, model=model_name, answer_type=answer_type, confidence=confidence, sources=sources)
 
-        # Send completion
         yield f"data: {json.dumps({'type': 'done', 'response_time_ms': elapsed})}\n\n"
 
     except Exception as e:
@@ -246,7 +255,7 @@ def _general_knowledge_response(
     answer = generate_fn(query, system_prompt=GENERAL_KNOWLEDGE_PROMPT, model_name=model_name)
     elapsed = int((time.time() - start_time) * 1000)
     log_query(query, "general_knowledge", 0.0, model_name, elapsed)
-    _store_conversation(conversation_id, query, answer, model=model_name, answer_type="general_knowledge", confidence=0.0)
+    _store_conversation(conversation_id, query, answer, model=model_name, answer_type="general_knowledge", confidence=0.0, sources=[])
 
     return ChatResponse(
         answer=answer,
@@ -262,11 +271,9 @@ def _general_knowledge_response(
 def _build_sources(chunks) -> List[Source]:
     """Build source citations from retrieved chunks."""
     sources = []
-    seen_files = set()
-
     for chunk in chunks:
         meta = chunk.metadata
-        file_name = meta.get("file_name", "Unknown")
+        file_name = meta.get("file_name", "") or meta.get("source_document", "Unknown")
 
         source = Source(
             file_name=file_name,
@@ -289,6 +296,7 @@ def _store_conversation(
     model: str = "gemini",
     answer_type: str = "dataset",
     confidence: float = 0.0,
+    sources: Optional[Any] = None,
 ) -> None:
     """Store user message and assistant response in SQLite database."""
     try:
@@ -300,6 +308,7 @@ def _store_conversation(
             model=model,
             answer_type=answer_type,
             confidence=confidence,
+            sources=sources,
         )
     except Exception as e:
         log.warning("Failed to store message in SQLite: %s", e)

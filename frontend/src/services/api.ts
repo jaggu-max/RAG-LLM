@@ -36,6 +36,20 @@ export const getDocument = async (id: string): Promise<DocumentItem> => {
   return data;
 };
 
+export const getDocumentContent = async (id: string): Promise<{
+  id: string;
+  filename: string;
+  file_type: string;
+  size_bytes: number;
+  chunks_count: number;
+  status: string;
+  full_text: string;
+  chunks: Array<{ chunk_id: string; text: string }>;
+}> => {
+  const { data } = await api.get(`/documents/${id}/content`);
+  return data;
+};
+
 export const uploadDocument = async (
   file: File,
   onProgress?: (percent: number) => void
@@ -44,7 +58,7 @@ export const uploadDocument = async (
   formData.append('file', file);
   const { data } = await api.post('/documents/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 300000,
+    timeout: 600000,
     onUploadProgress: (progressEvent) => {
       if (progressEvent.total) {
         const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);

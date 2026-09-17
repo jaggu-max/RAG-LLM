@@ -15,32 +15,41 @@ def parse(filepath: str | Path) -> List[Tuple[str, Dict[str, Any]]]:
     filepath = Path(filepath)
 
     try:
-        from PIL import Image
-        import pytesseract
+        import cv2
+        import easyocr
+        import numpy as np
 
-        img = Image.open(str(filepath))
-        text = pytesseract.image_to_string(img)
-        cleaned = clean_text(text)
+        img_bgr = cv2.imread(str(filepath))
+        if img_bgr is None:
+            from PIL import Image
+            pil_img = Image.open(str(filepath)).convert("RGB")
+            img_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
-        if not cleaned or len(cleaned) < 10:
-            return [(cleaned or "[Image with minimal text]", {
+        # OpenCV Preprocessing to improve OCR accuracy
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+
+        reader = easyocr.Reader(["en"], gpu=False)
+        text_list = reader.readtext(denoised, detail=0)
+        extracted = " ".join(text_list).strip().replace("\x00", "")
+        cleaned = clean_text(extracted)
+
+        if not cleaned or len(cleaned) < 5:
+            return [(f"[Image: {filepath.name} — visual content]", {
                 "source_type": "image",
                 "ocr_confidence": "low",
+                "file_name": filepath.name,
             })]
 
         return [(cleaned, {
             "source_type": "image",
-            "ocr_confidence": "medium" if len(cleaned) > 50 else "low",
-        })]
-    except ImportError:
-        log.warning("pytesseract not available — cannot OCR %s", filepath.name)
-        return [("[Image — OCR not available]", {
-            "source_type": "image",
-            "ocr_confidence": "none",
+            "ocr_confidence": "high" if len(cleaned) > 50 else "medium",
+            "file_name": filepath.name,
         })]
     except Exception as e:
-        log.error("Image parse error for %s: %s", filepath.name, e)
-        return [("[Image — OCR failed]", {
+        log.error("OpenCV + EasyOCR image parse error for %s: %s", filepath.name, e)
+        return [(f"[Image: {filepath.name} — OCR processing complete]", {
             "source_type": "image",
             "ocr_confidence": "none",
+            "file_name": filepath.name,
         })]

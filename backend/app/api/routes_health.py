@@ -13,7 +13,6 @@ async def health_check():
     """Return service health status for all subsystems."""
     from app.models.database import get_chroma_client
     from app.services.embedding_service import EmbeddingService
-    from app.services.gemini_service import health_check as gemini_check
     from app.services.lmstudio_service import health_check as lmstudio_check
     from app.ingestion.watcher import is_watcher_running
 
@@ -31,10 +30,8 @@ async def health_check():
     except Exception:
         embed_status = "error"
 
-    # Gemini
-    gemini_status = "ready" if gemini_check() else "offline"
-    if not settings.GEMINI_API_KEY:
-        gemini_status = "not_configured"
+    # Gemini (not used — Ollama only)
+    gemini_status = "not_configured"
 
     # LM Studio
     lmstudio_status = "ready" if lmstudio_check() else "offline"
@@ -50,3 +47,11 @@ async def health_check():
         lmstudio=lmstudio_status,
         watcher=watcher_status,
     )
+
+
+@router.get("/providers/local-qwen/status")
+async def local_qwen_status():
+    """Return status details for Local Qwen / LM Studio provider."""
+    from app.providers.local_qwen_provider import local_qwen_provider
+    return local_qwen_provider.get_status()
+

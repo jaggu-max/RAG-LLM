@@ -30,9 +30,11 @@ class Settings(BaseSettings):
     # ── Gemini ───────────────────────────────────────
     GEMINI_API_KEY: str = ""
 
-    # ── LM Studio ───────────────────────────────────
-    LMSTUDIO_BASE_URL: str = "http://127.0.0.1:1234/v1"
-    LMSTUDIO_MODEL: str = "qwen2.5-7b-instruct-1m"
+    # ── Local Ollama / Qwen ─────────────────────────
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434/v1"
+    LMSTUDIO_BASE_URL: str = "http://127.0.0.1:11434/v1"
+    LMSTUDIO_MODEL: str = "qwen2.5:7b"
+
 
     # ── Memory & Storage Paths ──────────────────────
     CONVERSATION_MEMORY_LIMIT: int = 10
@@ -51,7 +53,7 @@ class Settings(BaseSettings):
     FINAL_TOP_K: int = 5
     CHUNK_SIZE: int = 800
     CHUNK_OVERLAP: int = 120
-    MAX_CONTEXT_CHARS: int = 2000
+    MAX_CONTEXT_CHARS: int = 4000
     CONFIDENCE_THRESHOLD: float = 0.70
 
     # ── Hybrid Search Weights ───────────────────────
@@ -62,6 +64,8 @@ class Settings(BaseSettings):
     RERANKER_ENABLED: bool = True
     AUTO_INDEX: bool = True
     FALLBACK_ENABLED: bool = True
+    ENABLE_IDENTIFIER_SEARCH: bool = True
+    ENABLE_STRUCTURED_EXTRACTION: bool = True
 
     # ── File Upload ─────────────────────────────────
     MAX_UPLOAD_SIZE_MB: int = 50

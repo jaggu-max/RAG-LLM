@@ -51,5 +51,5 @@ def validate_response(answer: str, context: str) -> bool:
 
 
 def build_insufficient_response() -> str:
-    return ("I couldn't find enough supporting information in the knowledge base "
-            "to answer that reliably.")
+    return "I couldn't find this information in the uploaded documents."
+

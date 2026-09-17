@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Enums ────────────────────────────────────────────────
@@ -28,9 +28,10 @@ class DocumentStatus(str, Enum):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000)
-    model: str = Field(default="gemini")
+    model: str = Field(default="local_qwen")
     conversation_id: Optional[str] = None
     use_knowledge_base: bool = True
+
 
 
 class Source(BaseModel):
@@ -140,9 +141,18 @@ class ChunkRecord(BaseModel):
 
 
 class RetrievedChunk(BaseModel):
-    chunk_id: str
-    document_id: str
-    text: str
-    score: float
-    metadata: Dict[str, Any] = {}
-    source: str = "semantic"
+    chunk_id: str = Field(default="")
+    document_id: str = Field(default="")
+    text: str = Field(default="")
+    score: float = Field(default=0.0)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    source: str = Field(default="semantic")
+
+    @field_validator("chunk_id", "document_id", "text", "source", mode="before")
+    @classmethod
+    def coerce_none_to_str(cls, v):
+        """Coerce None values to empty string to prevent Pydantic validation errors."""
+        if v is None:
+            return ""
+        return v
+
