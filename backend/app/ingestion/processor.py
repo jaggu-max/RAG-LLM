@@ -13,7 +13,7 @@ from app.ingestion.metadata import detect_dataset_type, extract_metadata
 from app.models.database import (
     add_to_chroma, delete_fts_by_document, delete_from_chroma,
     get_document, get_document_by_path, insert_document, insert_fts_chunks,
-    update_document,
+    update_document,  
 )
 from app.utils.hashing import hash_file
 
