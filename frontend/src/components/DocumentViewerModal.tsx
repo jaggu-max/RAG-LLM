@@ -18,6 +18,7 @@ interface DocumentViewerProps {
   onClose: () => void;
   initialTab?: 'document' | 'chunks' | 'full';
   initialSlide?: number;
+  highlightText?: string;
 }
 
 export default function DocumentViewerModal({
@@ -25,6 +26,7 @@ export default function DocumentViewerModal({
   onClose,
   initialTab = 'document',
   initialSlide = 1,
+  highlightText,
 }: DocumentViewerProps) {
   const [activeTab, setActiveTab] = useState<'document' | 'chunks' | 'full'>(initialTab);
   const [currentSlide, setCurrentSlide] = useState<number>(initialSlide);
@@ -202,6 +204,19 @@ export default function DocumentViewerModal({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 font-mono text-xs bg-[#F4F2ED]">
+          {/* Passage Highlight Banner */}
+          {highlightText && (
+            <div className="mb-3 p-3 bg-yellow-100 border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E]">
+              <div className="flex items-center gap-2 mb-1">
+                <AlertCircle className="w-4 h-4 text-[#DB4A2B]" />
+                <span className="font-mono text-xs font-bold uppercase text-[#1E1E1E]">MATCHING EVIDENCE PASSAGE:</span>
+              </div>
+              <p className="font-mono text-xs text-[#1E1E1E] bg-yellow-300/80 px-2 py-1 border border-[#1E1E1E] font-medium leading-relaxed">
+                "{highlightText}"
+              </p>
+            </div>
+          )}
+
           {activeTab === 'document' && (
             <div className="w-full h-[65vh] border-2 border-[#1E1E1E] bg-[#EAE8E3] overflow-auto shadow-[4px_4px_0px_#1E1E1E] flex flex-col items-center justify-center relative p-4">
               {loading ? (

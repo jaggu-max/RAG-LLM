@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, ChevronDown, ChevronRight, Circle, FileText, Clock, Shield, Loader2, ExternalLink, Terminal, Info } from 'lucide-react';
+import { Send, Sparkles, ChevronDown, Circle, FileText, Loader2, ExternalLink, Terminal, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { sendChat, getConversation } from '../services/api';
 import DocumentViewerModal from '../components/DocumentViewerModal';
@@ -44,6 +44,7 @@ export default function AssistantPage({
     full_text: string;
     chunks: Array<{ chunk_id: string; text: string }>;
     initialSlide?: number;
+    highlightText?: string;
   } | null>(null);
 
   const messagesEnd = useRef<HTMLDivElement>(null);
@@ -179,6 +180,7 @@ export default function AssistantPage({
       full_text: '',
       chunks: [],
       initialSlide: targetSlide,
+      highlightText: src.snippet,
     });
   };
 
@@ -273,16 +275,17 @@ export default function AssistantPage({
           doc={activeViewerDoc}
           onClose={() => setActiveViewerDoc(null)}
           initialSlide={activeViewerDoc.initialSlide}
+          highlightText={activeViewerDoc.highlightText}
         />
       )}
     </div>
   );
 }
 
-/* ── Professional Empty State ───────────────── */
+/* ── Minimalist Clean Empty State (No Sample Cards) ──── */
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center px-4 slide-up py-12">
+    <div className="flex flex-col items-center justify-center h-full text-center px-4 slide-up py-16">
       <div className="w-16 h-16 bg-[#DB4A2B] border-2 border-[#1E1E1E] shadow-[6px_6px_0px_#1E1E1E] flex items-center justify-center mb-6">
         <Sparkles className="w-8 h-8 text-white" />
       </div>
@@ -294,29 +297,9 @@ function EmptyState() {
         DOCUMENT INTELLIGENCE ASSISTANT
       </h2>
 
-      <p className="font-sans text-sm font-medium text-[#1E1E1E]/80 max-w-lg mb-8 leading-relaxed">
-        Ask precise questions about your uploaded documents. NEXUS uses multi-strategy hybrid retrieval, exact identifier matching, and LLM reasoning.
+      <p className="font-sans text-sm font-medium text-[#1E1E1E]/80 max-w-md leading-relaxed">
+        Ask precise questions about your uploaded documents. NEXUS retrieves factual evidence using multi-strategy hybrid search and local LLM reasoning.
       </p>
-
-      <div className="bg-white border-2 border-[#1E1E1E] shadow-[4px_4px_0px_#1E1E1E] p-6 max-w-md w-full text-left">
-        <h3 className="font-mono text-xs font-bold uppercase text-[#DB4A2B] mb-3 flex items-center gap-2">
-          <Info className="w-4 h-4" /> Recommended Queries:
-        </h3>
-        <ul className="font-mono text-xs text-[#1E1E1E]/80 space-y-2">
-          <li className="flex items-center gap-2">
-            <span className="text-[#DB4A2B] font-bold">›</span> "Explain the core concepts in my uploaded documents."
-          </li>
-          <li className="flex items-center gap-2">
-            <span className="text-[#DB4A2B] font-bold">›</span> "What are the main goals and requirements specified?"
-          </li>
-          <li className="flex items-center gap-2">
-            <span className="text-[#DB4A2B] font-bold">›</span> "SIH26037" (or any specific record identifier)
-          </li>
-        </ul>
-        <div className="mt-4 pt-3 border-t border-[#1E1E1E]/20 font-mono text-[10px] text-gray-500 uppercase">
-          Supported Formats: PDF • PPTX • DOCX • XLSX • Images • TXT
-        </div>
-      </div>
     </div>
   );
 }
@@ -330,6 +313,7 @@ function MessageBubble({
   onOpenSource: (src: Source) => void;
 }) {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showSourcesPop, setShowSourcesPop] = useState(false);
   const isUser = message.role === 'user';
   const res = message.response;
 
@@ -366,23 +350,32 @@ function MessageBubble({
           )}
         </div>
 
-        {/* Sources Section */}
+        {/* Compact Sources Trigger & Popover */}
         {!isUser && uniqueSources.length > 0 && (
-          <div className="mt-3 bg-[#E4E2DD]/80 border-2 border-[#1E1E1E] p-3 shadow-[3px_3px_0px_#1E1E1E]">
-            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-[#1E1E1E]/20">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-[#DB4A2B]" />
-                <span className="font-mono text-xs font-bold uppercase text-[#1E1E1E]">
-                  SOURCES ({uniqueSourceCount} {uniqueSourceCount === 1 ? 'DOCUMENT' : 'DOCUMENTS'})
-                </span>
-              </div>
-            </div>
+          <div className="relative mt-2">
+            <button
+              onClick={() => setShowSourcesPop(!showSourcesPop)}
+              className="inline-flex items-center gap-1.5 font-mono text-xs font-bold bg-white text-[#1E1E1E] hover:bg-[#DB4A2B] hover:text-white border-2 border-[#1E1E1E] shadow-[2px_2px_0px_#1E1E1E] px-2.5 py-1 transition-all"
+            >
+              <FileText className="w-3.5 h-3.5 text-[#DB4A2B]" />
+              <span>{uniqueSourceCount} {uniqueSourceCount === 1 ? 'SOURCE' : 'SOURCES'}</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showSourcesPop ? 'rotate-180' : ''}`} />
+            </button>
 
-            <div className="space-y-2">
-              {uniqueSources.map((src, i) => (
-                <SourceCard key={i} source={src} onOpen={() => onOpenSource(src)} />
-              ))}
-            </div>
+            {/* Compact Source Popover Card */}
+            {showSourcesPop && (
+              <div className="absolute left-0 mt-2 w-80 sm:w-96 bg-white border-2 border-[#1E1E1E] shadow-[6px_6px_0px_#1E1E1E] z-40 p-3 space-y-2 slide-up">
+                <div className="flex items-center justify-between border-b border-[#1E1E1E]/20 pb-1.5 mb-2">
+                  <span className="font-mono text-[10px] font-bold text-[#DB4A2B] uppercase">CITED SOURCES ({uniqueSourceCount})</span>
+                  <button onClick={() => setShowSourcesPop(false)} className="text-gray-400 hover:text-[#1E1E1E]">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {uniqueSources.map((src, i) => (
+                  <CompactSourceCard key={i} source={src} onOpen={() => onOpenSource(src)} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -432,8 +425,8 @@ function MessageBubble({
   );
 }
 
-/* ── Source Card Component ───────────────────── */
-function SourceCard({ source, onOpen }: { source: Source; onOpen: () => void }) {
+/* ── Compact Source Card Component ────────────── */
+function CompactSourceCard({ source, onOpen }: { source: Source; onOpen: () => void }) {
   const slidesStr = source.slides && source.slides.length > 0
     ? `Slides: ${source.slides.join(', ')}`
     : (source.slide_number ? `Slide ${source.slide_number}` : '');
@@ -445,24 +438,30 @@ function SourceCard({ source, onOpen }: { source: Source; onOpen: () => void }) 
   const locationInfo = slidesStr || pagesStr || (source.section ? `Section: ${source.section}` : '');
 
   return (
-    <div className="bg-white border border-[#1E1E1E] p-2.5 flex items-center justify-between shadow-[2px_2px_0px_#1E1E1E]">
-      <div className="flex items-center gap-2.5 overflow-hidden pr-2">
-        <FileText className="w-4 h-4 text-[#DB4A2B] flex-shrink-0" />
-        <div className="truncate">
+    <div className="bg-[#F9F8F5] border border-[#1E1E1E] p-2.5 space-y-1.5 shadow-[2px_2px_0px_#1E1E1E]">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 overflow-hidden pr-2">
+          <FileText className="w-3.5 h-3.5 text-[#DB4A2B] flex-shrink-0" />
           <p className="font-mono text-xs font-bold text-[#1E1E1E] truncate">{source.file_name}</p>
-          {locationInfo && (
-            <p className="font-mono text-[10px] text-gray-600 font-medium">{locationInfo}</p>
-          )}
         </div>
+        <button
+          onClick={onOpen}
+          className="flex items-center gap-1 bg-[#1E1E1E] text-white hover:bg-[#DB4A2B] text-[10px] font-mono font-bold px-2 py-0.5 transition-colors flex-shrink-0"
+        >
+          <span>Open Source</span>
+          <ExternalLink className="w-2.5 h-2.5" />
+        </button>
       </div>
 
-      <button
-        onClick={onOpen}
-        className="flex items-center gap-1 bg-[#1E1E1E] text-white hover:bg-[#DB4A2B] text-[10px] font-mono font-bold px-2.5 py-1 transition-colors flex-shrink-0"
-      >
-        <span>Open Source</span>
-        <ExternalLink className="w-3 h-3" />
-      </button>
+      {locationInfo && (
+        <p className="font-mono text-[10px] text-[#DB4A2B] font-bold">{locationInfo}</p>
+      )}
+
+      {source.snippet && (
+        <p className="font-mono text-[10px] text-gray-700 bg-white p-1.5 border border-[#1E1E1E]/20 line-clamp-2 leading-tight">
+          "{source.snippet}"
+        </p>
+      )}
     </div>
   );
 }

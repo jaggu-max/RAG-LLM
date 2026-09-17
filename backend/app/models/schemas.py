@@ -47,6 +47,7 @@ class Source(BaseModel):
     chunk_count: int = 1
     score: float = 0.0
     sheet_name: Optional[str] = None
+    snippet: Optional[str] = None
 
 
 class RetrievalInfo(BaseModel):

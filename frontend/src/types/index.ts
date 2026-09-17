@@ -20,6 +20,7 @@ export interface Source {
   chunk_count?: number;
   score: number;
   sheet_name?: string;
+  snippet?: string;
 }
 
 export interface RetrievalInfo {

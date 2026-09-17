@@ -314,15 +314,18 @@ def _build_deduplicated_sources(chunks) -> tuple[List[Source], int]:
                 "sections": set(),
                 "top_score": chunk.score if hasattr(chunk, "score") else 0.0,
                 "top_chunk_id": chunk.chunk_id if hasattr(chunk, "chunk_id") else "",
+                "top_text": chunk.text if hasattr(chunk, "text") else "",
                 "chunk_count": 0,
             }
 
         group = grouped[doc_id]
         group["chunk_count"] += 1
         score = chunk.score if hasattr(chunk, "score") else 0.0
-        if score > group["top_score"]:
+        if score >= group["top_score"]:
             group["top_score"] = score
             group["top_chunk_id"] = chunk.chunk_id if hasattr(chunk, "chunk_id") else ""
+            if hasattr(chunk, "text") and chunk.text:
+                group["top_text"] = chunk.text
 
         if page is not None and isinstance(page, int) and page > 0:
             group["pages"].add(page)
@@ -349,6 +352,7 @@ def _build_deduplicated_sources(chunks) -> tuple[List[Source], int]:
             chunk_id=info["top_chunk_id"],
             chunk_count=info["chunk_count"],
             score=info["top_score"],
+            snippet=info.get("top_text", ""),
         )
         sources.append(source)
 
