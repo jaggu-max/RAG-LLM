@@ -330,7 +330,21 @@ async def process_query_stream(request: ChatRequest) -> AsyncGenerator[str, None
                 prompt_template = get_prompt_for_intent(plan.intent)
                 system = prompt_template.format(context=context)
                 answer_type = "dataset"
-                dedup_sources, unique_src_cnt = _build_deduplicated_sources(reranked)
+
+                # Strict relevance filtering for citations
+                CITATION_SCORE_MIN = 0.28
+                CITATION_TOP_K = 3
+                is_img_intent = plan.intent == QueryIntent.IMAGE_NOTE
+                if is_img_intent:
+                    reranked_for_sources = [c for c in reranked if _chunk_is_image_doc(c)]
+                    if not reranked_for_sources and candidates:
+                        for c in candidates:
+                            if _chunk_is_image_doc(c):
+                                reranked_for_sources.append(c); break
+                else:
+                    reranked_for_sources = [c for c in reranked if (getattr(c, 'score', 0.0) or 0.0) >= CITATION_SCORE_MIN]
+
+                dedup_sources, unique_src_cnt = _build_deduplicated_sources(reranked_for_sources, top_k_docs=CITATION_TOP_K)
                 sources = [s.model_dump() for s in dedup_sources]
 
             retrieval = {
