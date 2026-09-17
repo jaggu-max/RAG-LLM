@@ -44,6 +44,8 @@ export default function DocumentViewerModal({
   const [currentSlide, setCurrentSlide] = useState<number>(initialSlide);
   const [zoom, setZoom] = useState<number>(100);
   const [loading, setLoading] = useState<boolean>(true);
+  const [showEvidenceBanner, setShowEvidenceBanner] = useState<boolean>(true);
+  const [isEvidenceExpanded, setIsEvidenceExpanded] = useState<boolean>(false);
   const [docContent, setDocContent] = useState<{
     full_text: string;
     raw_ocr: string;
@@ -208,16 +210,33 @@ export default function DocumentViewerModal({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 font-mono text-xs bg-[#F4F2ED]">
-          {/* Highlight Banner */}
-          {highlightText && (
-            <div className="mb-3 p-3 bg-yellow-100 border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E]">
-              <div className="flex items-center gap-2 mb-1">
-                <AlertCircle className="w-4 h-4 text-[#DB4A2B]" />
-                <span className="font-mono text-xs font-bold uppercase text-[#1E1E1E]">MATCHING EVIDENCE PASSAGE:</span>
+          {/* Highlight Banner — Compact & Dismissible */}
+          {highlightText && showEvidenceBanner && (
+            <div className="mb-2 p-2 bg-yellow-100 border-2 border-[#1E1E1E] shadow-[2px_2px_0px_#1E1E1E] flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2 flex-1 min-w-0">
+                <AlertCircle className="w-4 h-4 text-[#DB4A2B] shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] font-bold uppercase text-[#1E1E1E]">MATCHING EVIDENCE PASSAGE:</span>
+                    <button
+                      onClick={() => setIsEvidenceExpanded(!isEvidenceExpanded)}
+                      className="font-mono text-[10px] text-[#DB4A2B] underline font-bold hover:text-black">
+                      {isEvidenceExpanded ? '[COLLAPSE]' : '[EXPAND FULL TEXT]'}
+                    </button>
+                  </div>
+                  <p className={`font-mono text-[11px] text-[#1E1E1E] bg-yellow-200/80 px-2 py-1 border border-[#1E1E1E]/40 font-medium leading-normal mt-1 ${
+                    isEvidenceExpanded ? 'whitespace-pre-wrap' : 'truncate'
+                  }`}>
+                    "{highlightText}"
+                  </p>
+                </div>
               </div>
-              <p className="font-mono text-xs text-[#1E1E1E] bg-yellow-300/80 px-2 py-1 border border-[#1E1E1E] font-medium leading-relaxed">
-                "{highlightText}"
-              </p>
+              <button
+                onClick={() => setShowEvidenceBanner(false)}
+                title="Dismiss evidence banner"
+                className="p-1 hover:bg-yellow-300 text-[#1E1E1E] border border-[#1E1E1E] bg-white rounded shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
 
