@@ -10,7 +10,7 @@ from typing import List, Optional
 from app.core.logging import get_logger
 
 log = get_logger(__name__) 
-
+   
 
 class QueryIntent(str, Enum):
     EXACT_IDENTIFIER = "exact_identifier"
