@@ -117,32 +117,33 @@ export default function DocumentViewerModal({
   const structuredOcrText = docContent?.structured_ocr || docContent?.full_text || doc.full_text || '';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 slide-up">
-      <div className="bg-white border-2 border-[#1E1E1E] shadow-[8px_8px_0px_#1E1E1E] w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 slide-up overflow-y-auto">
+      <div className="bg-white border-2 border-[#1E1E1E] shadow-[8px_8px_0px_#1E1E1E] w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden my-auto">
         
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-3 bg-[#1E1E1E] text-white border-b-2 border-[#1E1E1E]">
-          <div className="flex items-center gap-3">
-            <FileText className="w-5 h-5 text-[#DB4A2B]" />
-            <div>
-              <h2 className="font-display text-base font-bold truncate max-w-[500px]">{doc.filename}</h2>
-              <p className="font-mono text-[10px] text-white/70 uppercase">
+        {/* Header — Sticky & Always Visible */}
+        <div className="flex items-center justify-between px-4 sm:px-6 py-2.5 bg-[#1E1E1E] text-white border-b-2 border-[#1E1E1E] shrink-0 sticky top-0 z-50">
+          <div className="flex items-center gap-3 min-w-0">
+            <FileText className="w-5 h-5 text-[#DB4A2B] shrink-0" />
+            <div className="min-w-0">
+              <h2 className="font-display text-sm sm:text-base font-bold truncate max-w-[320px] sm:max-w-[500px]">{doc.filename}</h2>
+              <p className="font-mono text-[10px] text-white/70 uppercase truncate">
                 TYPE: {doc.file_type} • SIZE: {formatSize(doc.size_bytes)} • CHUNKS: {doc.chunks_count} • DETECTED BLOCKS: {blocks.length}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0 ml-2">
             <button
               onClick={() => downloadOriginalDoc(doc.id, doc.filename)}
               title="Download Original File"
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#DB4A2B] text-white font-mono text-xs font-bold border border-white/20 hover:bg-[#c23b1e] transition-colors shadow-[2px_2px_0px_#000]">
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-[#DB4A2B] text-white font-mono text-xs font-bold border border-white/20 hover:bg-[#c23b1e] transition-colors shadow-[2px_2px_0px_#000]">
               <Download className="w-3.5 h-3.5" />
-              <span>DOWNLOAD ORIGINAL</span>
+              <span>DOWNLOAD</span>
             </button>
             <button
               onClick={onClose}
-              className="p-1 hover:bg-white/20 transition-colors rounded">
-              <X className="w-5 h-5 text-white" />
+              title="Close Preview (ESC)"
+              className="flex items-center justify-center p-1.5 bg-[#DB4A2B] text-white border border-white/40 hover:bg-red-600 transition-colors shadow-[2px_2px_0px_#000] rounded-sm">
+              <X className="w-5 h-5 text-white stroke-[3px]" />
             </button>
           </div>
         </div>
