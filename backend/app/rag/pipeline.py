@@ -114,11 +114,12 @@ def process_query(request: ChatRequest) -> ChatResponse:
         prompt_template = get_prompt_for_intent(plan.intent)
         system = prompt_template.format(context=context)
 
-        # Step 10: Generate answer
-        answer = generate_fn(query, system_prompt=system, model_name=model_name)
+        # Step 10: Generate answer & clean residual evidence markers
+        raw_answer = generate_fn(query, system_prompt=system, model_name=model_name)
+        answer = _clean_answer_text(raw_answer)
 
-        # Step 11: Build sources
-        sources = _build_sources(reranked)
+        # Step 11: Build deduplicated sources
+        sources, unique_source_count = _build_deduplicated_sources(reranked)
 
         elapsed = int((time.time() - start_time) * 1000)
 
@@ -142,6 +143,7 @@ def process_query(request: ChatRequest) -> ChatResponse:
                 semantic_results=semantic_count,
                 keyword_results=keyword_count,
                 reranked_results=reranked_count,
+                unique_source_count=unique_source_count,
             ),
             response_time_ms=elapsed,
             conversation_id=conversation_id,
@@ -214,9 +216,15 @@ async def process_query_stream(request: ChatRequest) -> AsyncGenerator[str, None
                 prompt_template = get_prompt_for_intent(plan.intent)
                 system = prompt_template.format(context=context)
                 answer_type = "dataset"
-                sources = [s.model_dump() for s in _build_sources(reranked)]
+                dedup_sources, unique_src_cnt = _build_deduplicated_sources(reranked)
+                sources = [s.model_dump() for s in dedup_sources]
 
-            retrieval = {"semantic_results": sc, "keyword_results": kc, "reranked_results": len(reranked)}
+            retrieval = {
+                "semantic_results": sc,
+                "keyword_results": kc,
+                "reranked_results": len(reranked),
+                "unique_source_count": unique_src_cnt if 'unique_src_cnt' in locals() else 0,
+            }
 
         # Send metadata first
         meta = {
@@ -268,24 +276,89 @@ def _general_knowledge_response(
     )
 
 
-def _build_sources(chunks) -> List[Source]:
-    """Build source citations from retrieved chunks."""
-    sources = []
+import re
+
+def _clean_answer_text(text: str) -> str:
+    """Clean inline evidence references or relevance scores from LLM response."""
+    if not text:
+        return text
+    cleaned = re.sub(r'\([E|e]vidence\s+\d+:[^\)]+\)', '', text)
+    cleaned = re.sub(r'\[Source:[^\]]+\]', '', cleaned)
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
+    return cleaned
+
+
+def _build_deduplicated_sources(chunks) -> tuple[List[Source], int]:
+    """Group retrieved chunks by document_id/file_name into deduplicated source cards."""
+    if not chunks:
+        return [], 0
+
+    grouped: Dict[str, Dict[str, Any]] = {}
     for chunk in chunks:
-        meta = chunk.metadata
+        meta = chunk.metadata or {}
+        doc_id = meta.get("document_id") or meta.get("doc_id") or meta.get("file_name", "Unknown")
         file_name = meta.get("file_name", "") or meta.get("source_document", "Unknown")
+        file_type = meta.get("file_type") or (file_name.split(".")[-1].lower() if "." in file_name else "")
+
+        page = meta.get("page_number")
+        slide = meta.get("slide_number")
+        section = meta.get("section") or meta.get("sheet_name")
+
+        if doc_id not in grouped:
+            grouped[doc_id] = {
+                "file_name": file_name,
+                "document_id": doc_id,
+                "file_type": file_type,
+                "pages": set(),
+                "slides": set(),
+                "sections": set(),
+                "top_score": chunk.score if hasattr(chunk, "score") else 0.0,
+                "top_chunk_id": chunk.chunk_id if hasattr(chunk, "chunk_id") else "",
+                "chunk_count": 0,
+            }
+
+        group = grouped[doc_id]
+        group["chunk_count"] += 1
+        score = chunk.score if hasattr(chunk, "score") else 0.0
+        if score > group["top_score"]:
+            group["top_score"] = score
+            group["top_chunk_id"] = chunk.chunk_id if hasattr(chunk, "chunk_id") else ""
+
+        if page is not None and isinstance(page, int) and page > 0:
+            group["pages"].add(page)
+        if slide is not None and isinstance(slide, int) and slide > 0:
+            group["slides"].add(slide)
+        if section:
+            group["sections"].add(str(section))
+
+    sources: List[Source] = []
+    for doc_id, info in grouped.items():
+        pages_list = sorted(list(info["pages"]))
+        slides_list = sorted(list(info["slides"]))
+        sections_str = ", ".join(sorted(list(info["sections"]))) if info["sections"] else None
 
         source = Source(
-            file_name=file_name,
-            page=meta.get("page_number") if meta.get("page_number") else None,
-            section=meta.get("section", "") or meta.get("sheet_name", "") or None,
-            chunk_id=chunk.chunk_id,
-            score=chunk.score,
-            sheet_name=meta.get("sheet_name") or None,
-            slide_number=meta.get("slide_number") if meta.get("slide_number") else None,
+            file_name=info["file_name"],
+            document_id=info["document_id"],
+            file_type=info["file_type"],
+            page=pages_list[0] if pages_list else None,
+            pages=pages_list,
+            slide_number=slides_list[0] if slides_list else None,
+            slides=slides_list,
+            section=sections_str,
+            chunk_id=info["top_chunk_id"],
+            chunk_count=info["chunk_count"],
+            score=info["top_score"],
         )
         sources.append(source)
 
+    sources.sort(key=lambda s: s.score, reverse=True)
+    return sources, len(sources)
+
+
+def _build_sources(chunks) -> List[Source]:
+    """Compatibility wrapper for source building."""
+    sources, _ = _build_deduplicated_sources(chunks)
     return sources
 
 

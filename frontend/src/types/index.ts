@@ -9,18 +9,24 @@ export interface ChatRequest {
 
 export interface Source {
   file_name: string;
+  document_id?: string;
+  file_type?: string;
   page?: number;
+  pages?: number[];
+  slide_number?: number;
+  slides?: number[];
   section?: string;
-  chunk_id: string;
+  chunk_id?: string;
+  chunk_count?: number;
   score: number;
   sheet_name?: string;
-  slide_number?: number;
 }
 
 export interface RetrievalInfo {
   semantic_results: number;
   keyword_results: number;
   reranked_results: number;
+  unique_source_count?: number;
 }
 
 export interface ChatResponse {

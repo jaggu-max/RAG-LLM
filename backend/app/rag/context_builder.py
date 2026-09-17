@@ -86,17 +86,20 @@ def build_context(
             # Standard evidence format
             source_label = chunk.metadata.get("file_name", "Unknown")
             page = chunk.metadata.get("page_number", "")
+            slide = chunk.metadata.get("slide_number", "")
             sheet = chunk.metadata.get("sheet_name", "")
             section = chunk.metadata.get("section", "")
 
             source_info = f"[Source: {source_label}"
-            if page:
+            if slide:
+                source_info += f", Slide {slide}"
+            elif page:
                 source_info += f", Page {page}"
             if sheet:
                 source_info += f", Sheet: {sheet}"
             if section:
                 source_info += f", Section: {section}"
-            source_info += f", Relevance: {chunk.score:.0%}]"
+            source_info += "]"
 
             entry = f"--- Evidence {i+1} {source_info} ---\n{chunk.text}"
 

@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, ChevronDown, Circle, FileText, Clock, Shield, Loader2 } from 'lucide-react';
+import { Send, Sparkles, ChevronDown, ChevronRight, Circle, FileText, Clock, Shield, Loader2, ExternalLink, Terminal, Info } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { sendChat, getConversation } from '../services/api';
+import DocumentViewerModal from '../components/DocumentViewerModal';
 import type { ChatMessage, ChatResponse, ModelInfo, Source } from '../types';
 
 interface Props {
@@ -33,6 +34,18 @@ export default function AssistantPage({
   const [input, setInput] = useState(draftInput);
   const [loading, setLoading] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [activeViewerDoc, setActiveViewerDoc] = useState<{
+    id: string;
+    filename: string;
+    file_type: string;
+    size_bytes: number;
+    chunks_count: number;
+    status: string;
+    full_text: string;
+    chunks: Array<{ chunk_id: string; text: string }>;
+    initialSlide?: number;
+  } | null>(null);
+
   const messagesEnd = useRef<HTMLDivElement>(null);
 
   const handleInputChange = (val: string) => {
@@ -43,13 +56,6 @@ export default function AssistantPage({
   const updateMessages = (newMsgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setMessages(newMsgs);
   };
-
-  // Sync draft messages with App parent state cleanly after render
-  const activeConvRef = useRef<string | null>(activeConversationId || null);
-
-  useEffect(() => {
-    activeConvRef.current = activeConversationId || null;
-  }, [activeConversationId]);
 
   useEffect(() => {
     setDraftMessages?.(messages);
@@ -67,7 +73,6 @@ export default function AssistantPage({
       return;
     }
 
-    // Only load from backend if switching conversations, not when appending to current active thread
     const loadConversation = async () => {
       try {
         const conv = await getConversation(activeConversationId);
@@ -93,7 +98,7 @@ export default function AssistantPage({
                 confidence: m.confidence || 0,
                 model: m.model || selectedModel,
                 sources: Array.isArray(parsedSources) ? parsedSources : [],
-                retrieval: { semantic_results: 0, keyword_results: 0, reranked_results: 0 },
+                retrieval: { semantic_results: 0, keyword_results: 0, reranked_results: 0, unique_source_count: Array.isArray(parsedSources) ? parsedSources.length : 0 },
                 response_time_ms: 0,
                 conversation_id: activeConversationId,
               } : undefined
@@ -160,18 +165,26 @@ export default function AssistantPage({
     }
   };
 
+  const handleOpenSourceViewer = (src: Source) => {
+    const fileExt = src.file_name.split('.').pop()?.toLowerCase() || 'pdf';
+    const targetSlide = (src.slides && src.slides.length > 0) ? src.slides[0] : ((src.pages && src.pages.length > 0) ? src.pages[0] : (src.slide_number || src.page || 1));
 
-
-  const suggestions = [
-    "Summarize the most important information in my dataset",
-    "Who teaches DBMS?",
-    "Show top 5 students",
-    "What class do I have tomorrow?",
-  ];
+    setActiveViewerDoc({
+      id: src.document_id || src.file_name,
+      filename: src.file_name,
+      file_type: src.file_type || fileExt,
+      size_bytes: 0,
+      chunks_count: src.chunk_count || 1,
+      status: 'indexed',
+      full_text: '',
+      chunks: [],
+      initialSlide: targetSlide,
+    });
+  };
 
   return (
     <div className="relative flex-1 flex flex-col h-full bg-[#E4E2DD] text-[#1E1E1E] overflow-hidden slide-up">
-      {/* Multiply Background Blobs */}
+      {/* Background Blobs */}
       <div className="absolute -top-20 -left-20 w-96 h-96 rounded-full bg-[#DB4A2B]/20 multiply-blob pointer-events-none" />
       <div className="absolute top-1/3 -right-20 w-96 h-96 rounded-full bg-[#F8A348]/25 multiply-blob pointer-events-none" />
       <div className="absolute -bottom-20 left-1/3 w-96 h-96 rounded-full bg-[#FF89A9]/20 multiply-blob pointer-events-none" />
@@ -179,8 +192,8 @@ export default function AssistantPage({
       {/* Top bar */}
       <div className="relative z-10 flex items-center justify-between px-6 py-4 border-b-2 border-[#1E1E1E] bg-[#E4E2DD]/90 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <span className="font-mono text-xs font-bold uppercase tracking-widest text-[#DB4A2B] bg-[#1E1E1E] text-white px-2 py-0.5 border border-[#1E1E1E]">POSTER UI</span>
-          <h2 className="font-display text-lg font-bold tracking-tight text-[#1E1E1E]">AI Assistant</h2>
+          <span className="font-mono text-xs font-bold uppercase tracking-widest text-[#DB4A2B] bg-[#1E1E1E] text-white px-2 py-0.5 border border-[#1E1E1E]">MASTER RAG</span>
+          <h2 className="font-display text-lg font-bold tracking-tight text-[#1E1E1E]">Enterprise Assistant</h2>
         </div>
 
         {/* Model selector */}
@@ -192,7 +205,6 @@ export default function AssistantPage({
             <Circle className={`w-2.5 h-2.5 fill-current ${currentModel?.available !== false ? 'text-[#DB4A2B]' : 'text-gray-400'}`} />
             <span className="text-[#1E1E1E]">{currentModel?.name || (selectedModel === 'local_qwen' ? 'Ollama (gemma3:4b)' : selectedModel)}</span>
             <ChevronDown className="w-3.5 h-3.5 text-[#1E1E1E]" />
-
           </button>
 
           {showModelMenu && (
@@ -221,11 +233,15 @@ export default function AssistantPage({
       {/* Messages area */}
       <div className="relative z-10 flex-1 overflow-y-auto px-6 py-6">
         {messages.length === 0 ? (
-          <EmptyState suggestions={suggestions} onSelect={(s) => { handleInputChange(s); }} />
+          <EmptyState />
         ) : (
           <div className="max-w-3xl mx-auto space-y-6">
             {messages.map(msg => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                onOpenSource={handleOpenSourceViewer}
+              />
             ))}
             {loading && <TypingIndicator model={currentModel?.name || selectedModel} />}
             <div ref={messagesEnd} />
@@ -233,75 +249,109 @@ export default function AssistantPage({
         )}
       </div>
 
-      {/* Input */}
+      {/* Input bar */}
       <div className="relative z-10 px-6 py-4 border-t-2 border-[#1E1E1E] bg-[#E4E2DD]">
         <div className="max-w-3xl mx-auto">
-          <form onSubmit={(e) => { e.preventDefault(); handleSend(); }}
-                className="flex gap-3">
+          <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex gap-3">
             <input
               value={input}
               onChange={e => handleInputChange(e.target.value)}
-              placeholder="Ask anything about your dataset..."
+              placeholder="Ask anything about your uploaded knowledge base..."
               className="input-field flex-1 font-sans font-medium text-sm"
               disabled={loading}
             />
-            <button type="submit" disabled={loading || !input.trim()}
-                    className="btn-primary px-5" aria-label="Send message">
+            <button type="submit" disabled={loading || !input.trim()} className="btn-primary px-5" aria-label="Send message">
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 stroke-[3]" />}
             </button>
           </form>
         </div>
       </div>
 
+      {/* Document Viewer Modal */}
+      {activeViewerDoc && (
+        <DocumentViewerModal
+          doc={activeViewerDoc}
+          onClose={() => setActiveViewerDoc(null)}
+          initialSlide={activeViewerDoc.initialSlide}
+        />
+      )}
     </div>
   );
 }
 
-/* ── Empty State ─────────────────────────────── */
-function EmptyState({ suggestions, onSelect }: { suggestions: string[]; onSelect: (s: string) => void }) {
+/* ── Professional Empty State ───────────────── */
+function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center px-4 slide-up">
-      <div className="w-20 h-20 bg-[#DB4A2B] border-2 border-[#1E1E1E] shadow-[6px_6px_0px_#1E1E1E]
-                      flex items-center justify-center mb-6">
-        <Sparkles className="w-10 h-10 text-white" />
+    <div className="flex flex-col items-center justify-center h-full text-center px-4 slide-up py-12">
+      <div className="w-16 h-16 bg-[#DB4A2B] border-2 border-[#1E1E1E] shadow-[6px_6px_0px_#1E1E1E] flex items-center justify-center mb-6">
+        <Sparkles className="w-8 h-8 text-white" />
       </div>
 
-      <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-[-0.05em] leading-[0.85] text-[#1E1E1E] mb-3 uppercase">
-        Knowledge Base
+      <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-[#1E1E1E] mb-2 uppercase">
+        NEXUS RAG
       </h1>
-      <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-[-0.05em] leading-[0.85] text-[#DB4A2B] mb-6 uppercase">
-        Swiss RAG Intelligence
+      <h2 className="font-mono text-xs font-bold tracking-widest text-[#DB4A2B] uppercase mb-6 bg-[#1E1E1E] text-white px-3 py-1 border border-[#1E1E1E]">
+        DOCUMENT INTELLIGENCE ASSISTANT
       </h2>
 
-      <p className="font-sans text-sm font-medium text-[#1E1E1E]/80 max-w-md mb-8 leading-relaxed">
-        Upload documents to the Knowledge Base and query your dataset with high precision.
-        NEXUS uses hybrid semantic-keyword retrieval grounded by Swiss RAG pipeline.
+      <p className="font-sans text-sm font-medium text-[#1E1E1E]/80 max-w-lg mb-8 leading-relaxed">
+        Ask precise questions about your uploaded documents. NEXUS uses multi-strategy hybrid retrieval, exact identifier matching, and LLM reasoning.
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl">
-        {suggestions.map((s, i) => (
-          <button key={i} onClick={() => onSelect(s)}
-                  className="bg-white border-2 border-[#1E1E1E] shadow-[4px_4px_0px_#1E1E1E]
-                             hover:shadow-[6px_6px_0px_#DB4A2B] hover:border-[#1E1E1E]
-                             p-4 text-xs font-bold text-[#1E1E1E] text-left transition-all active:translate-x-[1px] active:translate-y-[1px]">
-            "{s}"
-          </button>
-        ))}
+      <div className="bg-white border-2 border-[#1E1E1E] shadow-[4px_4px_0px_#1E1E1E] p-6 max-w-md w-full text-left">
+        <h3 className="font-mono text-xs font-bold uppercase text-[#DB4A2B] mb-3 flex items-center gap-2">
+          <Info className="w-4 h-4" /> Recommended Queries:
+        </h3>
+        <ul className="font-mono text-xs text-[#1E1E1E]/80 space-y-2">
+          <li className="flex items-center gap-2">
+            <span className="text-[#DB4A2B] font-bold">›</span> "Explain the core concepts in my uploaded documents."
+          </li>
+          <li className="flex items-center gap-2">
+            <span className="text-[#DB4A2B] font-bold">›</span> "What are the main goals and requirements specified?"
+          </li>
+          <li className="flex items-center gap-2">
+            <span className="text-[#DB4A2B] font-bold">›</span> "SIH26037" (or any specific record identifier)
+          </li>
+        </ul>
+        <div className="mt-4 pt-3 border-t border-[#1E1E1E]/20 font-mono text-[10px] text-gray-500 uppercase">
+          Supported Formats: PDF • PPTX • DOCX • XLSX • Images • TXT
+        </div>
       </div>
     </div>
   );
 }
 
 /* ── Message Bubble ──────────────────────────── */
-function MessageBubble({ message }: { message: ChatMessage }) {
-  const [showSources, setShowSources] = useState(false);
+function MessageBubble({
+  message,
+  onOpenSource,
+}: {
+  message: ChatMessage;
+  onOpenSource: (src: Source) => void;
+}) {
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const isUser = message.role === 'user';
   const res = message.response;
+
+  // Deduplicate sources by document_id or file_name if present
+  const uniqueSources: Source[] = [];
+  if (res && res.sources && res.sources.length > 0) {
+    const seen = new Set<string>();
+    for (const src of res.sources) {
+      const key = src.document_id || src.file_name;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueSources.push(src);
+      }
+    }
+  }
+
+  const uniqueSourceCount = res?.retrieval?.unique_source_count || uniqueSources.length;
 
   return (
     <div className={`flex gap-3 ${isUser ? 'justify-end' : 'justify-start'} slide-up`}>
       <div className={`max-w-[85%] ${isUser ? 'order-1' : ''}`}>
-        {/* Content */}
+        {/* Answer Content */}
         <div className={`border-2 border-[#1E1E1E] p-4 text-sm leading-relaxed
           ${isUser
             ? 'bg-[#1E1E1E] text-[#E4E2DD] shadow-[4px_4px_0px_#DB4A2B]'
@@ -316,46 +366,65 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           )}
         </div>
 
-        {/* Response metadata */}
-        {res && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-mono font-bold">
-            <span className={`inline-flex items-center gap-1 border border-[#1E1E1E] px-2 py-0.5
-              ${res.answer_type === 'dataset' ? 'bg-[#DB4A2B] text-white'
-                : res.answer_type === 'general_knowledge' ? 'bg-[#F8A348] text-[#1E1E1E]'
-                : 'bg-[#FF89A9] text-[#1E1E1E]'}`}>
-              {res.answer_type === 'dataset' ? 'DATASET' : res.answer_type === 'general_knowledge' ? 'GENERAL' : 'INSUFFICIENT'}
-            </span>
+        {/* Sources Section */}
+        {!isUser && uniqueSources.length > 0 && (
+          <div className="mt-3 bg-[#E4E2DD]/80 border-2 border-[#1E1E1E] p-3 shadow-[3px_3px_0px_#1E1E1E]">
+            <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-[#1E1E1E]/20">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-[#DB4A2B]" />
+                <span className="font-mono text-xs font-bold uppercase text-[#1E1E1E]">
+                  SOURCES ({uniqueSourceCount} {uniqueSourceCount === 1 ? 'DOCUMENT' : 'DOCUMENTS'})
+                </span>
+              </div>
+            </div>
 
-            {res.confidence > 0 && (
-              <span className="flex items-center gap-1 text-[#1E1E1E]/80 border border-[#1E1E1E] px-1.5 py-0.5 bg-white">
-                <Shield className="w-3 h-3 text-[#DB4A2B]" />
-                {Math.round(res.confidence * 100)}%
-              </span>
-            )}
-
-            <span className="flex items-center gap-1 text-[#1E1E1E]/80 border border-[#1E1E1E] px-1.5 py-0.5 bg-white">
-              <Clock className="w-3 h-3 text-[#DB4A2B]" />
-              {res.response_time_ms} ms
-            </span>
-
-            <span className="border border-[#1E1E1E] px-1.5 py-0.5 bg-white uppercase text-[#1E1E1E]">{res.model}</span>
-
-            {res.sources.length > 0 && (
-              <button onClick={() => setShowSources(!showSources)}
-                      className="flex items-center gap-1 bg-[#1E1E1E] text-white px-2 py-0.5 border border-[#1E1E1E] hover:bg-[#DB4A2B] transition-colors">
-                <FileText className="w-3 h-3" />
-                {res.sources.length} SOURCE{res.sources.length > 1 ? 'S' : ''}
-              </button>
-            )}
+            <div className="space-y-2">
+              {uniqueSources.map((src, i) => (
+                <SourceCard key={i} source={src} onOpen={() => onOpenSource(src)} />
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Sources panel */}
-        {showSources && res?.sources && (
-          <div className="mt-2 space-y-1.5">
-            {res.sources.map((src, i) => (
-              <SourceCard key={i} source={src} />
-            ))}
+        {/* Developer Diagnostics Toggle & Panel */}
+        {!isUser && res && (
+          <div className="mt-2">
+            <button
+              onClick={() => setShowDiagnostics(!showDiagnostics)}
+              className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-gray-600 hover:text-[#1E1E1E] bg-white/70 border border-[#1E1E1E]/30 px-2 py-0.5 transition-colors"
+            >
+              <Terminal className="w-3 h-3 text-[#DB4A2B]" />
+              {showDiagnostics ? 'HIDE DEVELOPER DIAGNOSTICS' : 'DEVELOPER DIAGNOSTICS'}
+            </button>
+
+            {showDiagnostics && (
+              <div className="mt-1.5 p-3 bg-[#1E1E1E] text-white border border-[#1E1E1E] font-mono text-[10px] space-y-1 slide-up">
+                <div className="flex justify-between border-b border-white/20 pb-1 mb-1">
+                  <span className="text-white/60">MODEL:</span>
+                  <span className="font-bold text-[#F8A348]">{res.model}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">RESPONSE TIME:</span>
+                  <span>{res.response_time_ms} ms</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">ANSWER TYPE:</span>
+                  <span className="uppercase text-[#DB4A2B] font-bold">{res.answer_type}</span>
+                </div>
+                {res.retrieval && (
+                  <div className="flex justify-between">
+                    <span className="text-white/60">CHUNKS (SEM/KEY/RERANK):</span>
+                    <span>{res.retrieval.semantic_results} / {res.retrieval.keyword_results} / {res.retrieval.reranked_results}</span>
+                  </div>
+                )}
+                {res.confidence > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-white/60">INTERNAL DENSE SCORE:</span>
+                    <span>{(res.confidence * 100).toFixed(1)}%</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -363,20 +432,37 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   );
 }
 
-/* ── Source Card ──────────────────────────────── */
-function SourceCard({ source }: { source: Source }) {
+/* ── Source Card Component ───────────────────── */
+function SourceCard({ source, onOpen }: { source: Source; onOpen: () => void }) {
+  const slidesStr = source.slides && source.slides.length > 0
+    ? `Slides: ${source.slides.join(', ')}`
+    : (source.slide_number ? `Slide ${source.slide_number}` : '');
+
+  const pagesStr = source.pages && source.pages.length > 0
+    ? `Pages: ${source.pages.join(', ')}`
+    : (source.page ? `Page ${source.page}` : '');
+
+  const locationInfo = slidesStr || pagesStr || (source.section ? `Section: ${source.section}` : '');
+
   return (
-    <div className="bg-white border-2 border-[#1E1E1E] shadow-[3px_3px_0px_#1E1E1E] p-2.5 text-[10px] font-mono">
-      <div className="flex items-center gap-2">
-        <FileText className="w-3.5 h-3.5 text-[#DB4A2B] flex-shrink-0" />
-        <span className="font-bold text-[#1E1E1E]">{source.file_name}</span>
-        <span className="text-[#1E1E1E]/70">
-          {source.page ? `Page ${source.page}` : ''}
-          {source.section ? ` • ${source.section}` : ''}
-          {source.sheet_name ? ` • Sheet: ${source.sheet_name}` : ''}
-        </span>
-        <span className="ml-auto font-bold text-[#DB4A2B]">{Math.round(source.score * 100)}%</span>
+    <div className="bg-white border border-[#1E1E1E] p-2.5 flex items-center justify-between shadow-[2px_2px_0px_#1E1E1E]">
+      <div className="flex items-center gap-2.5 overflow-hidden pr-2">
+        <FileText className="w-4 h-4 text-[#DB4A2B] flex-shrink-0" />
+        <div className="truncate">
+          <p className="font-mono text-xs font-bold text-[#1E1E1E] truncate">{source.file_name}</p>
+          {locationInfo && (
+            <p className="font-mono text-[10px] text-gray-600 font-medium">{locationInfo}</p>
+          )}
+        </div>
       </div>
+
+      <button
+        onClick={onOpen}
+        className="flex items-center gap-1 bg-[#1E1E1E] text-white hover:bg-[#DB4A2B] text-[10px] font-mono font-bold px-2.5 py-1 transition-colors flex-shrink-0"
+      >
+        <span>Open Source</span>
+        <ExternalLink className="w-3 h-3" />
+      </button>
     </div>
   );
 }
