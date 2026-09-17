@@ -350,30 +350,40 @@ function MessageBubble({
           )}
         </div>
 
-        {/* Compact Sources Trigger & Popover */}
+        {/* Inline Sources Panel — flows naturally, never overlaps */}
         {!isUser && uniqueSources.length > 0 && (
-          <div className="relative mt-2">
+          <div className="mt-2 w-full">
+            {/* Toggle Button */}
             <button
               onClick={() => setShowSourcesPop(!showSourcesPop)}
               className="inline-flex items-center gap-1.5 font-mono text-xs font-bold bg-white text-[#1E1E1E] hover:bg-[#DB4A2B] hover:text-white border-2 border-[#1E1E1E] shadow-[2px_2px_0px_#1E1E1E] px-2.5 py-1 transition-all"
             >
-              <FileText className="w-3.5 h-3.5 text-[#DB4A2B]" />
+              <FileText className="w-3.5 h-3.5 text-[#DB4A2B] group-hover:text-white" />
               <span>{uniqueSourceCount} {uniqueSourceCount === 1 ? 'SOURCE' : 'SOURCES'}</span>
-              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showSourcesPop ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showSourcesPop ? 'rotate-180' : ''}`} />
             </button>
 
-            {/* Compact Source Popover Card */}
+            {/* Expanded Source Cards — purely static flow, ZERO absolute/fixed */}
             {showSourcesPop && (
-              <div className="absolute left-0 mt-2 w-80 sm:w-96 bg-white border-2 border-[#1E1E1E] shadow-[6px_6px_0px_#1E1E1E] z-40 p-3 space-y-2 slide-up">
-                <div className="flex items-center justify-between border-b border-[#1E1E1E]/20 pb-1.5 mb-2">
-                  <span className="font-mono text-[10px] font-bold text-[#DB4A2B] uppercase">CITED SOURCES ({uniqueSourceCount})</span>
-                  <button onClick={() => setShowSourcesPop(false)} className="text-gray-400 hover:text-[#1E1E1E]">
+              <div className="mt-1.5 w-full border-2 border-[#1E1E1E] bg-white shadow-[4px_4px_0px_#1E1E1E] slide-up overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center justify-between px-3 py-2 bg-[#1E1E1E] text-white">
+                  <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#DB4A2B]">
+                    CITED SOURCES ({uniqueSourceCount})
+                  </span>
+                  <button
+                    onClick={() => setShowSourcesPop(false)}
+                    className="text-white/60 hover:text-white transition-colors">
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                {uniqueSources.map((src, i) => (
-                  <CompactSourceCard key={i} source={src} onOpen={() => onOpenSource(src)} />
-                ))}
+
+                {/* Source Cards — vertically stacked */}
+                <div className="divide-y divide-[#1E1E1E]/10 max-h-72 overflow-y-auto">
+                  {uniqueSources.map((src, i) => (
+                    <CompactSourceCard key={i} source={src} onOpen={() => onOpenSource(src)} />
+                  ))}
+                </div>
               </div>
             )}
           </div>

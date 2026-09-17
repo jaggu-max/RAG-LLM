@@ -220,13 +220,29 @@ export default function DocumentViewerModal({
                 </button>
               </div>
 
-              <div className="flex items-center gap-1 bg-white border border-[#1E1E1E] px-2 py-0.5 shadow-[2px_2px_0px_#1E1E1E]">
+              <div className="flex items-center gap-1 bg-white border border-[#1E1E1E] px-1 py-0.5 shadow-[2px_2px_0px_#1E1E1E]">
+                <button
+                  onClick={onClose}
+                  title="Close Preview"
+                  className="flex items-center gap-1 px-1.5 py-0.5 bg-[#DB4A2B] text-white font-mono font-bold text-[10px] hover:bg-red-700 transition-colors rounded-sm">
+                  <X className="w-3 h-3" />
+                  <span>CLOSE</span>
+                </button>
+                <div className="w-px h-4 bg-[#1E1E1E]/20 mx-0.5" />
                 <button onClick={() => setZoom((z) => Math.max(50, z - 25))} className="p-1 hover:bg-[#F0EEE6]">
                   <ZoomOut className="w-3.5 h-3.5" />
                 </button>
                 <span className="font-bold text-[11px] w-9 text-center">{zoom}%</span>
                 <button onClick={() => setZoom((z) => Math.min(200, z + 25))} className="p-1 hover:bg-[#F0EEE6]">
                   <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+                <div className="w-px h-4 bg-[#1E1E1E]/20 mx-0.5" />
+                <button
+                  onClick={onClose}
+                  title="Close Preview"
+                  className="flex items-center gap-1 px-1.5 py-0.5 bg-[#DB4A2B] text-white font-mono font-bold text-[10px] hover:bg-red-700 transition-colors rounded-sm">
+                  <X className="w-3 h-3" />
+                  <span>CLOSE</span>
                 </button>
               </div>
             </div>
