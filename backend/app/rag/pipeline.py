@@ -207,8 +207,33 @@ def process_query(request: ChatRequest) -> ChatResponse:
         raw_answer = generate_fn(query, system_prompt=system, model_name=model_name)
         answer = _clean_answer_text(raw_answer)
 
-        # Step 12: Build deduplicated sources
-        sources, unique_source_count = _build_deduplicated_sources(reranked)
+        # Step 12: Build strictly relevant deduplicated sources
+        # Only include chunks with score >= minimum relevance threshold
+        CITATION_SCORE_MIN = 0.28
+        CITATION_TOP_K = 3  # max number of distinct source documents to cite
+
+        # For image-intent queries, enforce strict image-document isolation regardless of score
+        if is_image_intent:
+            reranked_for_sources = [
+                c for c in reranked
+                if _chunk_is_image_doc(c)
+            ]
+            # Fallback: if no image chunks survived, still use top image chunk from all candidates
+            if not reranked_for_sources and candidates:
+                for c in candidates:
+                    if _chunk_is_image_doc(c):
+                        reranked_for_sources.append(c)
+                        break
+        else:
+            # Score-filter: only include chunks that meet minimum relevance threshold
+            reranked_for_sources = [
+                c for c in reranked
+                if (getattr(c, 'score', 0.0) or 0.0) >= CITATION_SCORE_MIN
+            ]
+
+        sources, unique_source_count = _build_deduplicated_sources(
+            reranked_for_sources, top_k_docs=CITATION_TOP_K
+        )
 
         elapsed = int((time.time() - start_time) * 1000)
 
@@ -377,8 +402,18 @@ def _clean_answer_text(text: str) -> str:
     return cleaned
 
 
-def _build_deduplicated_sources(chunks) -> tuple[List[Source], int]:
-    """Group retrieved chunks by document_id/file_name into deduplicated source cards."""
+def _chunk_is_image_doc(chunk) -> bool:
+    """Return True if this chunk belongs to an image/photo document."""
+    meta = getattr(chunk, 'metadata', {}) or {}
+    ft = str(meta.get('file_type', '') or getattr(chunk, 'file_type', '')).lower()
+    fn = str(meta.get('file_name', '') or meta.get('source_document', '') or getattr(chunk, 'file_name', '')).lower()
+    return ft in ('image', 'png', 'jpg', 'jpeg', 'webp') or any(fn.endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.webp'))
+
+
+def _build_deduplicated_sources(chunks, top_k_docs: int = 4) -> tuple[List[Source], int]:
+    """Group retrieved chunks by document_id/file_name into deduplicated source cards.
+    Only the top top_k_docs distinct documents are returned.
+    """
     if not chunks:
         return [], 0
 
@@ -446,6 +481,8 @@ def _build_deduplicated_sources(chunks) -> tuple[List[Source], int]:
         sources.append(source)
 
     sources.sort(key=lambda s: s.score, reverse=True)
+    # Cap to top_k_docs distinct documents
+    sources = sources[:top_k_docs]
     return sources, len(sources)
 
 
