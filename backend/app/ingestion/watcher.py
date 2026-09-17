@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.ingestion.processor import EXTENSION_TO_TYPE, process_file, remove_file
 
-log = get_logger(__name__)
+log = get_logger(__name__)     
 
 
 class DatasetEventHandler(FileSystemEventHandler):
