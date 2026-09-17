@@ -128,6 +128,17 @@ export default function DocumentViewerModal({
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-start justify-center slide-up overflow-auto"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{ padding: '2vh 2vw' }}>
+
+      {/* Always-Visible Floating Close Button — fixed to top-right of screen */}
+      <button
+        onClick={onClose}
+        title="Close Preview (ESC)"
+        style={{ position: 'fixed', top: '10px', right: '14px', zIndex: 99999 }}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#DB4A2B] text-white font-mono text-xs font-bold shadow-lg border-2 border-white hover:bg-red-700 transition-colors rounded-sm">
+        <X className="w-4 h-4 stroke-[3px]" />
+        <span>CLOSE</span>
+      </button>
+
       <div
         className="bg-white border-2 border-[#1E1E1E] shadow-[8px_8px_0px_#1E1E1E] w-full flex flex-col my-auto"
         style={{ maxWidth: 'min(1100px, 96vw)', maxHeight: '96vh', overflow: 'hidden' }}
