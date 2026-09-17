@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.database import get_document_by_id
+from app.models.database import get_document
 from app.utils.hashing import hash_file
 
 log = get_logger(__name__)
@@ -22,7 +22,7 @@ PREVIEWS_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_or_create_preview(doc_id: str, force: bool = False) -> Dict[str, Any]:
     """Retrieve existing preview metadata or generate a new conversion cache."""
-    doc = get_document_by_id(doc_id)
+    doc = get_document(doc_id)
     if not doc:
         raise ValueError(f"Document not found: {doc_id}")
 

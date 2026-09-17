@@ -36,18 +36,24 @@ class ChatRequest(BaseModel):
 
 class Source(BaseModel):
     file_name: str
+    document_id: Optional[str] = None
+    file_type: Optional[str] = None
     page: Optional[int] = None
-    section: Optional[str] = None
-    chunk_id: str
-    score: float
-    sheet_name: Optional[str] = None
+    pages: List[int] = []
     slide_number: Optional[int] = None
+    slides: List[int] = []
+    section: Optional[str] = None
+    chunk_id: Optional[str] = None
+    chunk_count: int = 1
+    score: float = 0.0
+    sheet_name: Optional[str] = None
 
 
 class RetrievalInfo(BaseModel):
     semantic_results: int = 0
     keyword_results: int = 0
     reranked_results: int = 0
+    unique_source_count: int = 0
 
 
 class ChatResponse(BaseModel):

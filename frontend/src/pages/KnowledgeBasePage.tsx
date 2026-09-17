@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileText, Trash2, RefreshCw, Database, CheckCircle2, AlertCircle, Loader2, Eye, X } from 'lucide-react';
 import { getDocuments, uploadDocument, deleteDocument, reindexDocument, reindexAll, getDocumentContent } from '../services/api';
+import DocumentViewerModal from '../components/DocumentViewerModal';
 import type { DocumentItem } from '../types';
 
 interface DocumentPreviewData {
@@ -311,108 +312,10 @@ export default function KnowledgeBasePage() {
 
       {/* Document Preview Modal */}
       {previewDoc && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white border-2 border-[#1E1E1E] shadow-[8px_8px_0px_#1E1E1E] w-full max-w-4xl max-h-[85vh] flex flex-col slide-up">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 bg-[#1E1E1E] text-white border-b-2 border-[#1E1E1E]">
-              <div className="flex items-center gap-3">
-                <FileText className="w-5 h-5 text-[#DB4A2B]" />
-                <div>
-                  <h2 className="font-display text-base font-bold truncate max-w-[400px]">{previewDoc.filename}</h2>
-                  <p className="font-mono text-[10px] text-white/70 uppercase">
-                    TYPE: {previewDoc.file_type} • SIZE: {formatSize(previewDoc.size_bytes)} • CHUNKS: {previewDoc.chunks_count}
-                  </p>
-                </div>
-              </div>
-              <button onClick={() => setPreviewDoc(null)} className="p-1 hover:bg-white/20 transition-colors">
-                <X className="w-5 h-5 text-white" />
-              </button>
-            </div>
-
-            {/* Modal Tabs */}
-            <div className="flex items-center gap-2 px-6 py-2 bg-[#E4E2DD] border-b-2 border-[#1E1E1E]">
-              <button
-                onClick={() => setActiveTab('document')}
-                className={`font-mono text-xs font-bold px-3 py-1 border border-[#1E1E1E] transition-all ${
-                  activeTab === 'document' ? 'bg-[#DB4A2B] text-white shadow-[2px_2px_0px_#1E1E1E]' : 'bg-white text-[#1E1E1E]'
-                }`}>
-                DOCUMENT PREVIEW
-              </button>
-              <button
-                onClick={() => setActiveTab('chunks')}
-                className={`font-mono text-xs font-bold px-3 py-1 border border-[#1E1E1E] transition-all ${
-                  activeTab === 'chunks' ? 'bg-[#DB4A2B] text-white shadow-[2px_2px_0px_#1E1E1E]' : 'bg-white text-[#1E1E1E]'
-                }`}>
-                CHUNKS ({previewDoc.chunks.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('full')}
-                className={`font-mono text-xs font-bold px-3 py-1 border border-[#1E1E1E] transition-all ${
-                  activeTab === 'full' ? 'bg-[#DB4A2B] text-white shadow-[2px_2px_0px_#1E1E1E]' : 'bg-white text-[#1E1E1E]'
-                }`}>
-                EXTRACTED TEXT
-              </button>
-            </div>
-
-            {/* Modal Content Body */}
-            <div className="flex-1 overflow-y-auto p-4 font-mono text-xs text-[#1E1E1E]">
-              {activeTab === 'document' ? (
-                <div className="w-full h-[60vh] border-2 border-[#1E1E1E] bg-white overflow-hidden shadow-[4px_4px_0px_#1E1E1E] flex flex-col">
-                  <object
-                    data={`http://localhost:8000/api/documents/${previewDoc.id}/file`}
-                    type={previewDoc.file_type === 'pdf' ? 'application/pdf' : 'text/plain'}
-                    className="w-full h-full"
-                  >
-                    <embed
-                      src={`http://localhost:8000/api/documents/${previewDoc.id}/file`}
-                      type={previewDoc.file_type === 'pdf' ? 'application/pdf' : 'text/plain'}
-                      className="w-full h-full"
-                    />
-                    <div className="p-8 text-center">
-                      <p className="font-bold text-sm mb-2">Unable to embed viewer directly in your browser.</p>
-                      <a
-                        href={`http://localhost:8000/api/documents/${previewDoc.id}/file`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn-primary text-xs uppercase inline-block px-4 py-2"
-                      >
-                        Open Document in New Tab
-                      </a>
-                    </div>
-                  </object>
-                </div>
-              ) : activeTab === 'chunks' ? (
-                <div className="space-y-4">
-                  {previewDoc.chunks.length === 0 ? (
-                    <p className="text-center text-gray-500 py-8">No text chunks extracted yet.</p>
-                  ) : (
-                    previewDoc.chunks.map((c, idx) => (
-                      <div key={c.chunk_id || idx} className="bg-[#E4E2DD]/40 border-2 border-[#1E1E1E] p-4 shadow-[3px_3px_0px_#1E1E1E]">
-                        <div className="flex items-center justify-between mb-2 pb-1 border-b border-[#1E1E1E]/20">
-                          <span className="font-mono text-[10px] font-bold uppercase text-[#DB4A2B]">CHUNK #{idx + 1}</span>
-                          <span className="font-mono text-[10px] text-gray-500">{c.chunk_id}</span>
-                        </div>
-                        <pre className="whitespace-pre-wrap font-sans text-xs text-[#1E1E1E] leading-relaxed">{c.text}</pre>
-                      </div>
-                    ))
-                  )}
-                </div>
-              ) : (
-                <div className="bg-[#E4E2DD]/40 border-2 border-[#1E1E1E] p-4 shadow-[3px_3px_0px_#1E1E1E]">
-                  <pre className="whitespace-pre-wrap font-sans text-xs text-[#1E1E1E] leading-relaxed">{previewDoc.full_text}</pre>
-                </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="px-6 py-3 bg-[#E4E2DD] border-t-2 border-[#1E1E1E] flex items-center justify-between">
-              <span className="font-mono text-[10px] uppercase font-bold text-[#1E1E1E]/70">STATUS: {previewDoc.status}</span>
-              <button onClick={() => setPreviewDoc(null)} className="btn-secondary text-xs uppercase font-bold px-4 py-1.5">
-                Close Viewer
-              </button>
-            </div>
-          </div>
-        </div>
+        <DocumentViewerModal
+          doc={previewDoc}
+          onClose={() => setPreviewDoc(null)}
+        />
       )}
     </div>
   );

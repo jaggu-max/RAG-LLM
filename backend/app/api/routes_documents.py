@@ -83,7 +83,7 @@ async def get_document_content(doc_id: str):
 
 @router.get("/documents/{doc_id}/file")
 async def serve_document_file(doc_id: str):
-    """Serve the raw uploaded document file (PDF, TXT, DOCX, etc.) for direct browser view."""
+    """Serve the raw uploaded document file inline if renderable (PDF, TXT, images)."""
     doc = get_document_by_id(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -98,6 +98,77 @@ async def serve_document_file(doc_id: str):
     media_type = "application/pdf" if doc["file_type"] == "pdf" else None
     headers = {"Content-Disposition": f"inline; filename=\"{doc['filename']}\""}
     return FileResponse(path=str(file_path), media_type=media_type, headers=headers)
+
+
+@router.get("/documents/{doc_id}/preview")
+async def get_document_preview(doc_id: str):
+    """Get preview metadata for a document (converting PPTX/DOCX if needed)."""
+    try:
+        from app.services.preview_service import get_or_create_preview
+        meta = get_or_create_preview(doc_id)
+        return meta
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate preview: {e}")
+
+
+@router.get("/documents/{doc_id}/preview/pdf")
+async def serve_preview_pdf(doc_id: str):
+    """Serve converted preview PDF with inline disposition."""
+    from app.services.preview_service import get_preview_pdf_path
+    pdf_path = get_preview_pdf_path(doc_id)
+    if not pdf_path or not pdf_path.exists():
+        # Fallback to generating preview
+        from app.services.preview_service import get_or_create_preview
+        get_or_create_preview(doc_id)
+        pdf_path = get_preview_pdf_path(doc_id)
+
+    if not pdf_path or not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="Preview PDF unavailable for this document")
+
+    from fastapi.responses import FileResponse
+    doc = get_document_by_id(doc_id)
+    filename = doc["filename"] if doc else "preview.pdf"
+    headers = {"Content-Disposition": f"inline; filename=\"preview_{filename}.pdf\""}
+    return FileResponse(path=str(pdf_path), media_type="application/pdf", headers=headers)
+
+
+@router.get("/documents/{doc_id}/preview/slide/{page_num}")
+async def serve_preview_slide(doc_id: str, page_num: int):
+    """Serve rendered slide PNG image inline."""
+    from app.services.preview_service import get_slide_image_path
+    img_path = get_slide_image_path(doc_id, page_num)
+    if not img_path or not img_path.exists():
+        # Fallback generate preview
+        from app.services.preview_service import get_or_create_preview
+        get_or_create_preview(doc_id)
+        img_path = get_slide_image_path(doc_id, page_num)
+
+    if not img_path or not img_path.exists():
+        raise HTTPException(status_code=404, detail=f"Slide image {page_num} not found")
+
+    from fastapi.responses import FileResponse
+    headers = {"Content-Disposition": f"inline; filename=\"slide_{page_num}.png\""}
+    return FileResponse(path=str(img_path), media_type="image/png", headers=headers)
+
+
+@router.get("/documents/{doc_id}/download")
+async def download_document_file(doc_id: str):
+    """Explicitly download the original document with attachment disposition."""
+    doc = get_document_by_id(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    file_path = Path(doc["file_path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Physical file missing on server")
+
+    headers = {"Content-Disposition": f"attachment; filename=\"{doc['filename']}\""}
+    return FileResponse(path=str(file_path), headers=headers)
 
 
 @router.post("/documents/upload", response_model=DocumentUploadResponse)

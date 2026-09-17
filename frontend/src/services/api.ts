@@ -82,6 +82,39 @@ export const reindexAll = async (): Promise<{ message: string; documents_process
   return data;
 };
 
+// Preview metadata request cache/deduplication map
+const previewRequestMap = new Map<string, Promise<any>>();
+
+export const getDocPreviewMetadata = async (id: string): Promise<{
+  document_id: string;
+  filename: string;
+  file_type: string;
+  status: string;
+  page_count: number;
+  preview_type: string;
+  has_pdf: boolean;
+  has_images: boolean;
+}> => {
+  if (previewRequestMap.has(id)) {
+    return previewRequestMap.get(id)!;
+  }
+  const req = api.get(`/documents/${id}/preview`).then(res => res.data).finally(() => {
+    previewRequestMap.delete(id);
+  });
+  previewRequestMap.set(id, req);
+  return req;
+};
+
+export const downloadOriginalDoc = (id: string, filename: string) => {
+  const downloadUrl = `${API_BASE}/documents/${id}/download`;
+  const a = document.createElement('a');
+  a.href = downloadUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
+
 // ── Health ──────────────────────────────────────
 export const getHealth = async (): Promise<HealthStatus> => {
   const { data } = await api.get<HealthStatus>('/health');
